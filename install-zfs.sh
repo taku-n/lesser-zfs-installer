@@ -243,7 +243,6 @@ function check_prerequisites {
     exit 1
   fi
 
-  set +x
 
   if [[ -v ZFS_PASSPHRASE && -n $ZFS_PASSPHRASE && ${#ZFS_PASSPHRASE} -lt 8 ]]; then
     echo "The passphase provided is too short; at least 8 chars required."
@@ -407,7 +406,6 @@ Devices with mounted partitions, cdroms, and removable devices are not displayed
 function ask_root_password_Debian {
   print_step_info_header
 
-  set +x
   if [[ ${ZFS_DEBIAN_ROOT_PASSWORD:-} != "" ]]; then
     v_root_password="$ZFS_DEBIAN_ROOT_PASSWORD"
   else
@@ -427,7 +425,6 @@ function ask_root_password_Debian {
 function ask_encryption {
   print_step_info_header
 
-  set +x
 
   if [[ -v ZFS_PASSPHRASE ]]; then
     v_passphrase=$ZFS_PASSPHRASE
@@ -760,7 +757,6 @@ Proceed with the configuration as usual, then, at the partitioning stage:
   # We don't use chroot()_execute here, as it works on $c_zfs_mount_dir (which is synced on a
   # later stage).
   #
-  set +x
   chroot "$c_installed_os_data_mount_dir" bash -c "echo root:$(printf "%q" "$v_root_password") | chpasswd"
   set -x
 
@@ -830,7 +826,6 @@ function create_pools {
   local rpool_disks_partitions=()
   local bpool_disks_partitions=()
 
-  set +x
 
   if [[ -n $v_passphrase ]]; then
     encryption_options=(-O "encryption=on" -O "keylocation=prompt" -O "keyformat=passphrase")
@@ -859,7 +854,6 @@ function create_pools {
   #
   # Stdin is ignored if the encryption is not set (and set via prompt).
   #
-  set +x
   echo -n "$v_passphrase" | zpool create \
     "${encryption_options[@]}" \
     "${v_rpool_tweaks[@]}" \
@@ -1246,6 +1240,46 @@ You now need to perform a hard reset, then enjoy your ZFS system :-)"
 if [[ $# -ne 0 ]]; then
   display_help_and_exit
 fi
+
+# debug stuff ##########################
+
+v_bpool_name=bpool
+v_bpool_tweaks=(-o "ashift=12")
+v_encrypt_rpool=0
+v_passphrase=12345678
+v_root_password=a
+v_rpool_name=rpool
+v_rpool_tweaks=(-o "ashift=12" -O "acltype=posixacl" -O "compression=lz4" -O "dnodesize=auto" -O "relatime=on" -O "xattr=sa" -O "normalization=formD")
+v_selected_disks=("/dev/disk/by-id/$(ls -l /dev/disk/by-id | perl -ane 'print $F[8] if /sda$/')")
+v_swap_size=2
+v_free_tail_space=1
+
+#v_linux_distribution=                                              # ignore; just don't skip `set_distribution_data`
+v_zfs_08_in_repository=                                             # !! must set manually if starting after install_host_packages() !!
+v_temp_volume_device=$(readlink -f "${v_selected_disks[0]}-part4")
+#v_suitable_disks=                                                  # ignore; jusk skip find_suitable_disks()
+
+export ZFS_SKIP_LIVE_ZFS_MODULE_INSTALL=0
+export ZFS_NO_INFO_MESSAGES=1
+
+export ZFS_SELECTED_DISKS=$(echo "${v_selected_disks[*]}" | sed 's/ /,/')
+export ZFS_OS_INSTALLATION_SCRIPT=
+export ZFS_ENCRYPT_RPOOL=$v_encrypt_rpool
+export ZFS_PASSPHRASE=$v_passphrase
+export ZFS_DEBIAN_ROOT_PASSWORD=$v_root_password
+export ZFS_BPOOL_NAME=$v_bpool_name
+export ZFS_RPOOL_NAME=$v_rpool_name
+export ZFS_BPOOL_TWEAKS="${v_bpool_tweaks[*]}"
+export ZFS_RPOOL_TWEAKS="${v_rpool_tweaks[*]}"
+export ZFS_SWAP_SIZE=$v_swap_size
+export ZFS_FREE_TAIL_SPACE=$v_free_tail_space
+
+# umount /mnt/boot || true
+# umount /mnt || true
+# zpool destroy bpool || true
+# zpool destroy rpool || true
+
+########################################
 
 activate_debug
 set_distribution_data
