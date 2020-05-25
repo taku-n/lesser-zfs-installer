@@ -273,9 +273,9 @@ activate_debug () {
 set_distribution_data () {
   v_linux_distribution="$(lsb_release --id --short)"
 
-  if [[ "$v_linux_distribution" == "Ubuntu" ]] && grep -q '^Status: install ok installed$' < <(dpkg -s ubuntu-server 2> /dev/null); then
+  #if [[ "$v_linux_distribution" == "Ubuntu" ]] && grep -q '^Status: install ok installed$' < <(dpkg -s ubuntu-server 2> /dev/null); then
     v_linux_distribution="UbuntuServer"
-  fi
+  #fi
 
   v_linux_version="$(lsb_release --release --short)"
 }
