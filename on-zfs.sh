@@ -52,7 +52,7 @@ v_free_tail_space=           # integer
 # Variables set during execution
 
 v_temp_volume_device=        # /dev/zdN; scope: setup_partitions -> sync_os_temp_installation_dir_to_rpool
-v_suitable_disks=()          # (/dev/by-id/disk_id, ...); scope: find_suitable_disks -> select_disk
+#v_suitable_disks=()          # (/dev/by-id/disk_id, ...); scope: find_suitable_disks -> select_disk
 
 # Constants
 
@@ -389,11 +389,11 @@ find_suitable_disks () {
     #
     # Therefore, it's probably best to rely on the id name, and just filter out optical devices.
     #
-    if ! grep -q '^ID_TYPE=cd$' <<< "$device_info"; then
-      if ! grep -q "^$block_device_basename\$" <<< "$mounted_devices"; then
-        v_suitable_disks+=("$disk_id")
-      fi
-    fi
+    #if ! grep -q '^ID_TYPE=cd$' <<< "$device_info"; then
+      #if ! grep -q "^$block_device_basename\$" <<< "$mounted_devices"; then
+        #v_suitable_disks+=("$disk_id")
+      #fi
+    #fi
 
     cat >> "$c_disks_log" << LOG
 
@@ -403,7 +403,7 @@ $(udevadm info --query=property "$(readlink -f "$disk_id")")
 
 LOG
 
-  done < <(echo -n "$candidate_disk_ids")
+  done #< <(echo -n "$candidate_disk_ids")
 
   if [[ ${#v_suitable_disks[@]} -eq 0 ]]; then
     local dialog_message='No suitable disks have been found!
@@ -465,41 +465,41 @@ create_passphrase_named_pipe () {
   mkfifo "$c_passphrase_named_pipe"
 }
 
-select_disks () {
-  print_step_info_header
-
-  if [[ "${ZFS_SELECTED_DISKS:-}" != "" ]]; then
-    mapfile -d, -t v_selected_disks < <(echo -n "$ZFS_SELECTED_DISKS")
-  else
-    while true; do
-      local menu_entries_option=()
-      local block_device_basename
-
-      if [[ ${#v_suitable_disks[@]} -eq 1 ]]; then
-        local disk_selection_status=ON
-      else
-        local disk_selection_status=OFF
-      fi
-
-      for disk_id in "${v_suitable_disks[@]}"; do
-        block_device_basename="$(basename "$(readlink -f "$disk_id")")"
-        menu_entries_option+=("$disk_id" "($block_device_basename)" "$disk_selection_status")
-      done
-
-      local dialog_message="Select the ZFS devices.
-
-Devices with mounted partitions, cdroms, and removable devices are not displayed!
-"
-      mapfile -t v_selected_disks < <(whiptail --checklist --separate-output "$dialog_message" 30 100 $((${#menu_entries_option[@]} / 3)) "${menu_entries_option[@]}" 3>&1 1>&2 2>&3)
-
-      if [[ ${#v_selected_disks[@]} -gt 0 ]]; then
-        break
-      fi
-    done
-  fi
-
-  print_variables v_selected_disks
-}
+#select_disks () {
+#  print_step_info_header
+#
+#  if [[ "${ZFS_SELECTED_DISKS:-}" != "" ]]; then
+#    #mapfile -d, -t v_selected_disks < <(echo -n "$ZFS_SELECTED_DISKS")
+#  else
+#    while true; do
+#      local menu_entries_option=()
+#      local block_device_basename
+#
+#      if [[ ${#v_suitable_disks[@]} -eq 1 ]]; then
+#        local disk_selection_status=ON
+#      else
+#        local disk_selection_status=OFF
+#      fi
+#
+#      for disk_id in "${v_suitable_disks[@]}"; do
+#        block_device_basename="$(basename "$(readlink -f "$disk_id")")"
+#        menu_entries_option+=("$disk_id" "($block_device_basename)" "$disk_selection_status")
+#      done
+#
+#      local dialog_message="Select the ZFS devices.
+#
+#Devices with mounted partitions, cdroms, and removable devices are not displayed!
+#"
+#      mapfile -t v_selected_disks < <(whiptail --checklist --separate-output "$dialog_message" 30 100 $((${#menu_entries_option[@]} / 3)) "${menu_entries_option[@]}" 3>&1 1>&2 2>&3)
+#
+#      if [[ ${#v_selected_disks[@]} -gt 0 ]]; then
+#        break
+#      fi
+#    done
+#  fi
+#
+#  print_variables v_selected_disks
+#}
 
 select_pools_raid_type () {
   print_step_info_header
@@ -509,19 +509,19 @@ select_pools_raid_type () {
   elif [[ ${#v_selected_disks[@]} -ge 2 ]]; then
     # Entries preparation.
 
-    local menu_entries_option=(
-      ""      "Striping array" OFF
-      mirror  Mirroring        OFF
-      raidz   RAIDZ1           OFF
-    )
+    #local menu_entries_option=(
+    #  ""      "Striping array" OFF
+    #  mirror  Mirroring        OFF
+    #  raidz   RAIDZ1           OFF
+    #)
 
-    if [[ ${#v_selected_disks[@]} -ge 3 ]]; then
-      menu_entries_option+=(raidz2 RAIDZ2 OFF)
-    fi
+    #if [[ ${#v_selected_disks[@]} -ge 3 ]]; then
+    #  menu_entries_option+=(raidz2 RAIDZ2 OFF)
+    #fi
 
-    if [[ ${#v_selected_disks[@]} -ge 4 ]]; then
-      menu_entries_option+=(raidz3 RAIDZ3 OFF)
-    fi
+    #if [[ ${#v_selected_disks[@]} -ge 4 ]]; then
+    #  menu_entries_option+=(raidz3 RAIDZ3 OFF)
+    #fi
 
     # Defaults (ultimately, arbitrary). Based on https://calomel.org/zfs_raid_speed_capacity.html.
 
@@ -667,11 +667,11 @@ ask_pool_tweaks () {
 
   local raw_bpool_tweaks=${ZFS_BPOOL_TWEAKS:-$(whiptail --inputbox "Insert the tweaks for the boot pool" 30 100 -- "$c_default_bpool_tweaks" 3>&1 1>&2 2>&3)}
 
-  mapfile -d' ' -t v_bpool_tweaks < <(echo -n "$raw_bpool_tweaks")
+  #mapfile -d' ' -t v_bpool_tweaks < <(echo -n "$raw_bpool_tweaks")
 
   local raw_rpool_tweaks=${ZFS_RPOOL_TWEAKS:-$(whiptail --inputbox "Insert the tweaks for the root pool" 30 100 -- "$c_default_rpool_tweaks" 3>&1 1>&2 2>&3)}
 
-  mapfile -d' ' -t v_rpool_tweaks < <(echo -n "$raw_rpool_tweaks")
+  #mapfile -d' ' -t v_rpool_tweaks < <(echo -n "$raw_rpool_tweaks")
 
   print_variables v_bpool_tweaks v_rpool_tweaks
 }
@@ -973,17 +973,17 @@ create_pools () {
   # POOL OPTIONS #######################
 
   local passphrase
-  local encryption_options=()
-  local rpool_disks_partitions=()
-  local bpool_disks_partitions=()
+  #local encryption_options=()
+  #local rpool_disks_partitions=()
+  #local bpool_disks_partitions=()
 
   set +x
 
   passphrase=$(cat "$c_passphrase_named_pipe")
 
-  if [[ -n $passphrase ]]; then
-    encryption_options=(-O "encryption=on" -O "keylocation=prompt" -O "keyformat=passphrase")
-  fi
+  #if [[ -n $passphrase ]]; then
+    #encryption_options=(-O "encryption=on" -O "keylocation=prompt" -O "keyformat=passphrase")
+  #fi
 
   # Push back for unlogged reuse. Minor inconvenience, but worth :-)
   #
@@ -991,10 +991,10 @@ create_pools () {
 
   set -x
 
-  for selected_disk in "${v_selected_disks[@]}"; do
-    rpool_disks_partitions+=("${selected_disk}-part3")
-    bpool_disks_partitions+=("${selected_disk}-part2")
-  done
+  #for selected_disk in "${v_selected_disks[@]}"; do
+  #  rpool_disks_partitions+=("${selected_disk}-part3")
+  #  bpool_disks_partitions+=("${selected_disk}-part2")
+  #done
 
   # POOLS CREATION #####################
 
@@ -1217,20 +1217,20 @@ install_and_configure_bootloader_Debian () {
 sync_efi_partitions () {
   print_step_info_header
 
-  for ((i = 1; i < ${#v_selected_disks[@]}; i++)); do
-    local synced_efi_partition_path="/boot/efi$((i + 1))"
-
-    chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${v_selected_disks[i]}-part1") $synced_efi_partition_path vfat nofail,x-systemd.device-timeout=1 0 1 >> /etc/fstab"
-
-    chroot_execute "mkdir -p $synced_efi_partition_path"
-    chroot_execute "mount $synced_efi_partition_path"
-
-    chroot_execute "rsync --archive --delete --verbose /boot/efi/ $synced_efi_partition_path"
-
-    efibootmgr --create --disk "${v_selected_disks[i]}" --label "ubuntu-$((i + 1))" --loader '\EFI\ubuntu\grubx64.efi'
-
-    chroot_execute "umount $synced_efi_partition_path"
-  done
+  #for ((i = 1; i < ${#v_selected_disks[@]}; i++)); do
+  #  local synced_efi_partition_path="/boot/efi$((i + 1))"
+#
+#    chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${v_selected_disks[i]}-part1") $synced_efi_partition_path vfat nofail,x-systemd.device-timeout=1 0 1 >> /etc/fstab"
+#
+#    chroot_execute "mkdir -p $synced_efi_partition_path"
+#    chroot_execute "mount $synced_efi_partition_path"
+#
+#    chroot_execute "rsync --archive --delete --verbose /boot/efi/ $synced_efi_partition_path"
+#
+#    efibootmgr --create --disk "${v_selected_disks[i]}" --label "ubuntu-$((i + 1))" --loader '\EFI\ubuntu\grubx64.efi'
+#
+#    chroot_execute "umount $synced_efi_partition_path"
+#  done
 
   chroot_execute "umount /boot/efi"
 }
