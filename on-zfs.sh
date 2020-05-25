@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/bin/sh
+
 # shellcheck disable=SC2015,SC2016,SC2034
 
 # Shellcheck issue descriptions:
@@ -69,6 +70,10 @@ c_zfs_module_version_log=$c_log_dir/updated_module_versions.log
 # codes are not documented.
 #
 c_udevadm_settle_timeout=10 # seconds
+
+main () {
+	apt update && apt full-upgrade -y && apt install -y fbterm python-is-python3 && fbterm
+}
 
 # HELPER FUNCTIONS #############################################################
 
@@ -1328,6 +1333,8 @@ You now need to perform a hard reset, then enjoy your ZFS system :-)"
 }
 
 # MAIN #########################################################################
+
+main
 
 if [[ $# -ne 0 ]]; then
   display_help_and_exit
