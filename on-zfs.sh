@@ -65,7 +65,7 @@ c_boot_partition_size=768M   # while 512M are enough for a few kernels, the Ubun
 c_temporary_volume_size=12G  # large enough; Debian, for example, takes ~8 GiB.
 c_passphrase_named_pipe=$(dirname "$(mktemp)")/zfs-installer.pp.fifo
 
-c_log_dir=$(dirname "$(mktemp)")/zfs-installer
+c_log_dir=$(mktemp -dp /tmp on-zfs_XXX)  # e.g. /tmp/on-zfs_xyz
 c_install_log=$c_log_dir/install.log
 c_os_information_log=$c_log_dir/os_information.log
 c_running_processes_log=$c_log_dir/running_processes.log
@@ -95,9 +95,10 @@ function main {
 	check_prerequisites
 
 	display_intro_banner
-	find_suitable_disks
 	create_passphrase_named_pipe
 
+	local suitable_disks
+	local selected_disk
 	select_disks
 	ask_swap_size
 	ask_pool_tweaks
@@ -217,8 +218,7 @@ function chroot_execute {
 # PROCEDURE STEP FUNCTIONS #####################################################
 
 function display_help_and_exit {
-  local help
-  help='Usage: on-zfs.sh [help]
+	local help='Usage: on-zfs.sh [help]
 
 Sets up and install a ZFS Ubuntu installation.
 
@@ -227,7 +227,6 @@ This script needs to be run with admin permissions, from a Live CD.
 The procedure can be entirely automated via environment variables:
 
 - ZFS_OS_INSTALLATION_SCRIPT : path of a script to execute instead of Ubiquity (see dedicated section below)
-- ZFS_SELECTED_DISKS         : full path of the devices to create the pool on, comma-separated
 - ZFS_ENCRYPT_RPOOL          : set 1 to encrypt the pool
 - ZFS_PASSPHRASE             : set non-blank to encrypt the pool, and blank not to. if unset, it will be asked.
 - ZFS_DEBIAN_ROOT_PASSWORD
@@ -340,72 +339,6 @@ In order to stop the procedure, hit Esc twice during dialogs (excluding yes/no o
 	whiptail --msgbox "$dialog_message" 30 100
 }
 
-function find_suitable_disks {
-  print_step_info_header find_suitable_disks
-
-  # In some freaky cases, `/dev/disk/by-id` is not up to date, so we refresh. One case is after
-  # starting a VirtualBox VM that is a full clone of a suspended VM with snapshots.
-  #
-  udevadm trigger
-
-  # shellcheck disable=SC2012 # `ls` may clean the output, but in this case, it doesn't matter
-  ls -l /dev/disk/by-id | tail -n +2 | perl -lane 'print "@F[8..10]"' > "$c_disks_log"
-
-  local candidate_disk_ids
-  local mounted_devices
-
-  # Iterating via here-string generates an empty line when no devices are found. The options are
-  # either using this strategy, or adding a conditional.
-  #
-  candidate_disk_ids=$(find /dev/disk/by-id -regextype awk -regex '.+/(ata|nvme|scsi|mmc)-.+' -not -regex '.+-part[0-9]+$' | sort)
-  mounted_devices="$(df | awk 'BEGIN {getline} {print $1}' | xargs -n 1 lsblk -no pkname 2> /dev/null | sort -u || true)"
-
-  while read -r disk_id || [ -n "$disk_id" ]; do
-    local device_info
-    local block_device_basename
-
-    device_info="$(udevadm info --query=property "$(readlink -f "$disk_id")")"
-    block_device_basename="$(basename "$(readlink -f "$disk_id")")"
-
-    # It's unclear if it's possible to establish with certainty what is an internal disk:
-    #
-    # - there is no (obvious) spec around
-    # - pretty much everything has `DEVTYPE=disk`, e.g. LUKS devices
-    # - ID_TYPE is optional
-    #
-    # Therefore, it's probably best to rely on the id name, and just filter out optical devices.
-    #
-    if ! grep -q '^ID_TYPE=cd$' <<< "$device_info"; then
-      if ! grep -q "^$block_device_basename\$" <<< "$mounted_devices"; then
-        v_suitable_disks+=("$disk_id")
-      fi
-    fi
-
-    cat >> "$c_disks_log" << LOG
-
-## DEVICE: $disk_id ################################
-
-$(udevadm info --query=property "$(readlink -f "$disk_id")")
-
-LOG
-
-  done < <(echo -n "$candidate_disk_ids")
-
-  if [ ${#v_suitable_disks[@]} -eq 0 ]; then
-    local dialog_message='No suitable disks have been found!
-
-If you'\''re running inside a VMWare virtual machine, you need to add set `disk.EnableUUID = "TRUE"` in the .vmx configuration file.
-
-If you think this is a bug, please open an issue on https://github.com/saveriomiroddi/zfs-installer/issues, and attach the file `'"$c_disks_log"'`.
-'
-    whiptail --msgbox "$dialog_message" 30 100
-
-    exit 1
-  fi
-
-  print_variables v_suitable_disks
-}
-
 # By using a FIFO, we avoid having to hide statements like `echo $v_passphrase | zpoool create ...`
 # from the logs.
 #
@@ -420,35 +353,80 @@ function create_passphrase_named_pipe {
 function select_disks {
 	print_step_info_header select_disks
 
-	if [ "${ZFS_SELECTED_DISKS:-}" != "" ]; then
-		mapfile -d, -t v_selected_disks < <(echo -n "$ZFS_SELECTED_DISKS")
-	else
-		while true; do
-			local menu_entries_option=
-			local block_device_basename
+	# In some freaky cases, `/dev/disk/by-id` is not up to date, so we refresh. One case is
+	# after starting a VirtualBox VM that is a full clone of a suspended VM with snapshots.
+	udevadm trigger
 
-			if [ ${#v_suitable_disks[@]} -eq 1 ]; then
-				local disk_selection_status=ON
-			else
-				local disk_selection_status=OFF
+	# shellcheck disable=SC2012 # `ls` may clean the output, but in this case, it doesn't matter
+	ls -l /dev/disk/by-id | tail -n +2 | perl -lane 'print "@F[8..10]"' > "$c_disks_log"
+
+	# Iterating via here-string generates an empty line when no devices are found.
+	# The options are either using this strategy, or adding a conditional.
+	local candidate_disk_ids=$(find /dev/disk/by-id -regextype awk -regex '.+/(ata|nvme|scsi|mmc)-.+' -not -regex '.+-part[0-9]+$' | sort)
+	local mounted_devices="$(df | awk 'BEGIN {getline} {print $1}' | xargs -n 1 lsblk -no pkname 2> /dev/null | sort -u || true)"
+
+	while read -r disk_id || [ -n "$disk_id" ]; do
+		local device_info="$(udevadm info --query=property "$(readlink -f "$disk_id")")"
+		local block_device_basename="$(basename "$(readlink -f "$disk_id")")"
+
+		# It's unclear
+		# if it's possible to establish with certainty what is an internal disk:
+		#
+		# - there is no (obvious) spec around
+		# - pretty much everything has `DEVTYPE=disk`, e.g. LUKS devices
+		# - ID_TYPE is optional
+		#
+		# Therefore, it's probably best to rely on the id name,
+		# and just filter out optical devices.
+		if ! grep -q '^ID_TYPE=cd$' <<< "$device_info"; then  # 光学ドライブではない
+			# マウントされていない
+			if ! grep -q "^$block_device_basename\$" <<< "$mounted_devices"; then
+				v_suitable_disks+=("$disk_id")
 			fi
+		fi
 
-			for disk_id in "${v_suitable_disks[@]}"; do
-				block_device_basename="$(basename "$(readlink -f "$disk_id")")"
-				menu_entries_option+=("$disk_id" "($block_device_basename)" "$disk_selection_status")
-			done
+		cat >> "$c_disks_log" << LOG
 
-			local dialog_message="ZFS を構築するデバイスを選択してください。
+## DEVICE: $disk_id ################################
+
+$(udevadm info --query=property "$(readlink -f "$disk_id")")
+
+LOG
+
+	done < <(echo -n "$candidate_disk_ids")
+
+	if [ ${#v_suitable_disks[@]} -eq 0 ]; then
+		local dialog_message='No suitable disks have been found!
+
+If you'\''re running inside a VMWare virtual machine, you need to add set `disk.EnableUUID = "TRUE"` in the .vmx configuration file.
+
+If you think this is a bug, please open an issue on https://github.com/taku-n/on-zfs/issues, and attach the file `'"$c_disks_log"'`.
+'
+		whiptail --msgbox "$dialog_message" 30 100
+
+		exit 1
+	fi
+
+	print_variables v_suitable_disks
+
+	while true; do
+		local menu_entries_option
+
+		for disk_id in "${v_suitable_disks[@]}"; do
+			local block_device_basename="$(basename "$(readlink -f "$disk_id")")"
+			menu_entries_option+=("$disk_id" "($block_device_basename)")
+		done
+
+		local dialog_message="ZFS を構築するデバイスを選択してください。
 #
 #Devices with mounted partitions, cdroms, and removable devices are not displayed!
 #"
-			mapfile -t v_selected_disks < <(whiptail --radiolist --separate-output "$dialog_message" 30 100 $((${#menu_entries_option[@]} / 3)) "${menu_entries_option[@]}" 3>&1 1>&2 2>&3)
+		mapfile -t v_selected_disks < <(whiptail --menu --separate-output "$dialog_message" 30 100 $((${#menu_entries_option[@]} / 3)) "${menu_entries_option[@]}" 3>&1 1>&2 2>&3)
 
-			if [[ ${#v_selected_disks[@]} -gt 0 ]]; then
-				break
-			fi
-		done
-	fi
+		if [[ ${#v_selected_disks[@]} -gt 0 ]]; then
+			break
+		fi
+	done
 
 	print_variables v_selected_disks
 }
