@@ -29,8 +29,7 @@ set -o nounset
 
 # Variables set by the script
 
-v_linux_distribution=        # Debian, Ubuntu, ... WATCH OUT: not necessarily from `lsb_release` (ie. UbuntuServer)
-v_zfs_08_in_repository=      # 1=true, false otherwise (applies only to Ubuntu-based)
+v_linux_distribution=        # Ubuntu, ... WATCH OUT: not necessarily from `lsb_release` (ie. UbuntuServer)
 
 # Variables set (indirectly) by the user
 #
@@ -61,7 +60,7 @@ c_default_bpool_tweaks="-o ashift=12"
 c_default_rpool_tweaks="-o ashift=12 -O acltype=posixacl -O compression=lz4 -O dnodesize=auto -O relatime=on -O xattr=sa -O normalization=formD"
 c_zfs_mount_dir=/mnt
 c_installed_os_data_mount_dir=/target
-declare -A c_supported_linux_distributions=([Debian]=10 [Ubuntu]="18.04 20.04" [UbuntuServer]="18.04 20.04" [LinuxMint]="19.1 19.2 19.3" [elementary]=5.1)
+declare -A c_supported_linux_distributions=([Ubuntu]="20.04" [UbuntuServer]="20.04")
 c_boot_partition_size=768M   # while 512M are enough for a few kernels, the Ubuntu updater complains after a couple
 c_temporary_volume_size=12G  # large enough; Debian, for example, takes ~8 GiB.
 c_passphrase_named_pipe=$(dirname "$(mktemp)")/zfs-installer.pp.fifo
@@ -97,14 +96,13 @@ function main {
 
 	display_intro_banner
 	find_suitable_disks
-	find_zfs_package_requirements
 	create_passphrase_named_pipe
 
 	select_disks
 	ask_swap_size
 	ask_pool_tweaks
 
-	distro_dependent_invoke "install_host_packages"
+	install_host_packages
 	setup_partitions
 
 	if [[ "${ZFS_OS_INSTALLATION_SCRIPT:-}" == "" ]]; then
@@ -124,7 +122,7 @@ function main {
 	fi
 
 	prepare_jail
-	distro_dependent_invoke "install_jail_zfs_packages"
+	install_jail_zfs_packages
 	install_and_configure_bootloader
 	sync_efi_partitions
 	configure_boot_pool_import
@@ -408,35 +406,6 @@ If you think this is a bug, please open an issue on https://github.com/saveriomi
   print_variables v_suitable_disks
 }
 
-# There are three parameters:
-#
-# 1. the tools are preinstalled (ie. Ubuntu Desktop based);
-# 2. the default repository supports ZFS 0.8 (ie. Ubuntu 20.04+ based);
-# 3. the distro provides the precompiled ZFS module (i.e. Ubuntu based, not Debian)
-#
-# Fortunately, with Debian-specific logic isolated, we need conditionals based only on #2 - see
-# install_host_packages() and install_host_packages_UbuntuServer().
-#
-function find_zfs_package_requirements {
-  print_step_info_header find_zfs_package_requirements
-
-  # WATCH OUT. This is assumed by code in later functions.
-  #
-  apt update
-
-  local zfs_package_version
-  zfs_package_version=$(apt show zfsutils-linux 2> /dev/null | perl -ne 'print $1 if /^Version: (\d+\.\d+)\./')
-
-  if [[ -n $zfs_package_version ]]; then
-    if [[ ! $zfs_package_version =~ ^0\. ]]; then
-      >&2 echo "Unsupported ZFS version!: $zfs_package_version"
-      exit 1
-    elif (( $(echo "$zfs_package_version" | cut -d. -f2) >= 8 )); then
-      v_zfs_08_in_repository=1
-    fi
-  fi
-}
-
 # By using a FIFO, we avoid having to hide statements like `echo $v_passphrase | zpoool create ...`
 # from the logs.
 #
@@ -517,62 +486,11 @@ function ask_pool_tweaks {
 }
 
 function install_host_packages {
-  print_step_info_header install_host_packages
+	print_step_info_header install_host_packages
 
-  if [[ $v_zfs_08_in_repository != "1" ]]; then
-    if [[ ${ZFS_SKIP_LIVE_ZFS_MODULE_INSTALL:-} != "1" ]]; then
-      add-apt-repository --yes ppa:jonathonf/zfs
-      apt update
+	apt install -y efibootmgr zfsutils-linux
 
-      # Libelf-dev allows `CONFIG_STACK_VALIDATION` to be set - it's optional, but good to have.
-      # Module compilation log: `/var/lib/dkms/zfs/0.8.2/build/make.log` (adjust according to version).
-      #
-      echo "zfs-dkms zfs-dkms/note-incompatible-licenses note true" | debconf-set-selections
-      apt install --yes libelf-dev zfs-dkms
-
-      systemctl stop zfs-zed
-      modprobe -r zfs
-      modprobe zfs
-      systemctl start zfs-zed
-    fi
-  fi
-
-  apt install --yes efibootmgr
-
-  zfs --version > "$c_zfs_module_version_log" 2>&1
-}
-
-function install_host_packages_UbuntuServer {
-  print_step_info_header install_host_packages_UbuntuServer
-
-  if [[ $v_zfs_08_in_repository == "1" ]]; then
-    apt install --yes zfsutils-linux efibootmgr
-
-    zfs --version > "$c_zfs_module_version_log" 2>&1
-  elif [[ ${ZFS_SKIP_LIVE_ZFS_MODULE_INSTALL:-} != "1" ]]; then
-    # This is not needed on UBS 20.04, which has the modules built-in - incidentally, if attempted,
-    # it will cause /dev/disk/by-id changes not to be recognized.
-    #
-    # On Ubuntu Server, `/lib/modules` is a SquashFS mount, which is read-only.
-    #
-    cp -R /lib/modules /tmp/
-    systemctl stop 'systemd-udevd*'
-    umount /lib/modules
-    rm -r /lib/modules
-    ln -s /tmp/modules /lib
-    systemctl start 'systemd-udevd*'
-
-    # Additionally, the linux packages for the running kernel are not installed, at least when
-    # the standard installation is performed. Didn't test on the HWE option; if it's not required,
-    # this will be a no-op.
-    #
-    apt update
-    apt install -y "linux-headers-$(uname -r)"
-
-    install_host_packages
-  else
-    apt install --yes efibootmgr
-  fi
+	zfs --version > "$c_zfs_module_version_log" 2>&1
 }
 
 function setup_partitions {
@@ -853,39 +771,19 @@ function prepare_jail {
 # See install_host_packages() for some comments.
 #
 function install_jail_zfs_packages {
-  print_step_info_header install_jail_zfs_packages
+	print_step_info_header install_jail_zfs_packages
 
-  if [[ $v_zfs_08_in_repository != "1" ]]; then
-    chroot_execute "add-apt-repository --yes ppa:jonathonf/zfs"
+	# Oddly, on a 20.04 Ubuntu Desktop live session, the zfs tools are installed, but they are not
+	# associated to a package:
+	#
+	# - `dpkg -S $(which zpool)` -> nothing
+	# - `aptitude search ~izfs | awk '{print $2}' | xargs echo` -> libzfs2linux zfs-initramfs zfs-zed zfsutils-linux
+	#
+	# The packages are not installed by default, so we install them.
+	#
+	chroot_execute "apt install -y libzfs2linux zfs-initramfs zfs-zed zfsutils-linux"
 
-    chroot_execute "apt update"
-
-    chroot_execute 'echo "zfs-dkms zfs-dkms/note-incompatible-licenses note true" | debconf-set-selections'
-
-    chroot_execute "apt install --yes libelf-dev zfs-initramfs zfs-dkms"
-  else
-    # Oddly, on a 20.04 Ubuntu Desktop live session, the zfs tools are installed, but they are not
-    # associated to a package:
-    #
-    # - `dpkg -S $(which zpool)` -> nothing
-    # - `aptitude search ~izfs | awk '{print $2}' | xargs echo` -> libzfs2linux zfs-initramfs zfs-zed zfsutils-linux
-    #
-    # The packages are not installed by default, so we install them.
-    #
-    chroot_execute "apt install --yes libzfs2linux zfs-initramfs zfs-zed zfsutils-linux"
-  fi
-
-  chroot_execute "apt install --yes grub-efi-amd64-signed shim-signed"
-}
-
-function install_jail_zfs_packages_UbuntuServer {
-  print_step_info_header install_jail_zfs_packages_UbuntuServer
-
-  if [[ $v_zfs_08_in_repository == "1" ]]; then
-    chroot_execute "apt install --yes zfsutils-linux zfs-initramfs grub-efi-amd64-signed shim-signed"
-  else
-    install_jail_zfs_packages
-  fi
+	chroot_execute "apt install -y grub-efi-amd64-signed shim-signed"
 }
 
 function install_and_configure_bootloader {
