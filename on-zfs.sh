@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # shellcheck disable=SC2015,SC2016,SC2034
 
@@ -9,7 +9,8 @@
 #           used for interpolation
 # - SC2034: triggers a bug on the `-v` test (see https://git.io/Jenyu)
 
-set -o errexit  # コマンドがエラーになったらただちにシェルを終了
+set -o errexit   # コマンドがエラーになったらただちにシェルを終了
+set -o pipefail  # パイプの途中のエラーを検出して終了コードを返す
 
 # $1 が "" ならば fbterm をインストールして fbterm 内で再実行
 if [ " $1" = " " ]; then
@@ -93,6 +94,7 @@ main () {
 	distro_dependent_invoke "store_os_distro_information"
 	store_running_processes
 	check_prerequisites
+
 	display_intro_banner
 	find_suitable_disks
 	find_zfs_package_requirements
@@ -179,9 +181,9 @@ distro_dependent_invoke () {
 print_step_info_header () {
   echo -n "
 ###############################################################################
-# ${FUNCNAME[1]}"
+# $1"
 
-  [[ "${1:-}" != "" ]] && echo -n " $1" || true
+  [ "${1:-}" != "" ] && echo -n " $1" || true
 
   echo "
 ###############################################################################
@@ -261,7 +263,7 @@ When installing the O/S via $ZFS_OS_INSTALLATION_SCRIPT, the root pool is mounte
 }
 
 activate_debug () {
-  print_step_info_header
+  print_step_info_header activate_debug
 
   mkdir -p "$c_log_dir"
 
@@ -281,7 +283,7 @@ set_distribution_data () {
 }
 
 store_os_distro_information () {
-  print_step_info_header
+  print_step_info_header store_os_distro_information
 
   lsb_release --all > "$c_os_information_log"
 
@@ -293,7 +295,7 @@ store_os_distro_information () {
 }
 
 store_os_distro_information_Debian () {
-  store_os_distro_information
+  store_os_distro_information store_os_distro_information_Debian
 
   echo "DEBIAN_VERSION=$(cat /etc/debian_version)" >> "$c_os_information_log"
 }
@@ -306,32 +308,32 @@ store_running_processes () {
 }
 
 check_prerequisites () {
-  print_step_info_header
+  print_step_info_header check_prerequisites
 
-  local distro_version_regex=\\b${v_linux_version//./\\.}\\b
+  #local distro_version_regex=\\b${v_linux_version//./\\.}\\b
 
   # shellcheck disable=SC2116 # `=~ $(echo ...)` causes a warning; see https://git.io/Je2QP.
   #
-  if [[ ! -d /sys/firmware/efi ]]; then
+  if [ ! -d /sys/firmware/efi ]; then
     echo 'System firmware directory not found; make sure to boot in EFI mode!'
     exit 1
-  elif [[ $(id -u) -ne 0 ]]; then
+  elif [ $(id -u) -ne 0 ]; then
     echo 'This script must be run with administrative privileges!'
     exit 1
-  elif [[ "${ZFS_OS_INSTALLATION_SCRIPT:-}" != "" && ! -x "$ZFS_OS_INSTALLATION_SCRIPT" ]]; then
+  elif [ "${ZFS_OS_INSTALLATION_SCRIPT:-}" != "" && ! -x "$ZFS_OS_INSTALLATION_SCRIPT" ]; then
     echo "The custom O/S installation script provided doesn't exist or is not executable!"
     exit 1
-  elif [[ ! -v c_supported_linux_distributions["$v_linux_distribution"] ]]; then
+  elif [ ! -v c_supported_linux_distributions["$v_linux_distribution"] ]; then
     echo "This Linux distribution ($v_linux_distribution) is not supported!"
     exit 1
-  elif [[ ! ${c_supported_linux_distributions["$v_linux_distribution"]} =~ $distro_version_regex ]]; then
-    echo "This Linux distribution version ($v_linux_version) is not supported; supported versions: ${c_supported_linux_distributions["$v_linux_distribution"]}"
-    exit 1
+  #elif [ ! ${c_supported_linux_distributions["$v_linux_distribution"]} =~ $distro_version_regex ]; then
+    #echo "This Linux distribution version ($v_linux_version) is not supported; supported versions: ${c_supported_linux_distributions["$v_linux_distribution"]}"
+    #exit 1
   fi
 
   set +x
 
-  if [[ -v ZFS_PASSPHRASE && -n $ZFS_PASSPHRASE && ${#ZFS_PASSPHRASE} -lt 8 ]]; then
+  if [ -v ZFS_PASSPHRASE && -n $ZFS_PASSPHRASE && ${#ZFS_PASSPHRASE} -lt 8 ]; then
     echo "The passphase provided is too short; at least 8 chars required."
     exit 1
   fi
@@ -340,7 +342,7 @@ check_prerequisites () {
 }
 
 display_intro_banner () {
-  print_step_info_header
+  print_step_info_header display_intro_banner
 
   local dialog_message='Hello!
 
@@ -349,13 +351,11 @@ This script will prepare the ZFS pools on the system, install Ubuntu, and config
 In order to stop the procedure, hit Esc twice during dialogs (excluding yes/no ones), or Ctrl+C while any operation is running.
 '
 
-  if [[ ${ZFS_NO_INFO_MESSAGES:-} == "" ]]; then
-    whiptail --msgbox "$dialog_message" 30 100
-  fi
+	whiptail --msgbox "$dialog_message" 30 100
 }
 
 find_suitable_disks () {
-  print_step_info_header
+  print_step_info_header find_suitable_disks
 
   # In some freaky cases, `/dev/disk/by-id` is not up to date, so we refresh. One case is after
   # starting a VirtualBox VM that is a full clone of a suspended VM with snapshots.
@@ -374,7 +374,7 @@ find_suitable_disks () {
   candidate_disk_ids=$(find /dev/disk/by-id -regextype awk -regex '.+/(ata|nvme|scsi|mmc)-.+' -not -regex '.+-part[0-9]+$' | sort)
   mounted_devices="$(df | awk 'BEGIN {getline} {print $1}' | xargs -n 1 lsblk -no pkname 2> /dev/null | sort -u || true)"
 
-  while read -r disk_id || [[ -n "$disk_id" ]]; do
+  while read -r disk_id || [ -n "$disk_id" ]; do
     local device_info
     local block_device_basename
 
@@ -405,7 +405,7 @@ LOG
 
   done #< <(echo -n "$candidate_disk_ids")
 
-  if [[ ${#v_suitable_disks[@]} -eq 0 ]]; then
+  if [ ${#v_suitable_disks[@]} -eq 0 ]; then
     local dialog_message='No suitable disks have been found!
 
 If you'\''re running inside a VMWare virtual machine, you need to add set `disk.EnableUUID = "TRUE"` in the .vmx configuration file.
@@ -465,41 +465,41 @@ create_passphrase_named_pipe () {
   mkfifo "$c_passphrase_named_pipe"
 }
 
-#select_disks () {
-#  print_step_info_header
-#
-#  if [[ "${ZFS_SELECTED_DISKS:-}" != "" ]]; then
-#    #mapfile -d, -t v_selected_disks < <(echo -n "$ZFS_SELECTED_DISKS")
-#  else
-#    while true; do
-#      local menu_entries_option=()
-#      local block_device_basename
-#
-#      if [[ ${#v_suitable_disks[@]} -eq 1 ]]; then
-#        local disk_selection_status=ON
-#      else
-#        local disk_selection_status=OFF
-#      fi
-#
-#      for disk_id in "${v_suitable_disks[@]}"; do
-#        block_device_basename="$(basename "$(readlink -f "$disk_id")")"
-#        menu_entries_option+=("$disk_id" "($block_device_basename)" "$disk_selection_status")
-#      done
-#
-#      local dialog_message="Select the ZFS devices.
+select_disks () {
+	print_step_info_header select_disks
+
+	if [ "${ZFS_SELECTED_DISKS:-}" != "" ]; then
+		mapfile -d, -t v_selected_disks < <(echo -n "$ZFS_SELECTED_DISKS")
+	else
+		while true; do
+			local menu_entries_option=
+			local block_device_basename
+
+			if [ ${#v_suitable_disks[@]} -eq 1 ]; then
+				local disk_selection_status=ON
+			else
+				local disk_selection_status=OFF
+			fi
+
+			for disk_id in "${v_suitable_disks[@]}"; do
+				block_device_basename="$(basename "$(readlink -f "$disk_id")")"
+				menu_entries_option+=("$disk_id" "($block_device_basename)" "$disk_selection_status")
+			done
+
+			local dialog_message="ZFS を構築するデバイスを選択してください。
 #
 #Devices with mounted partitions, cdroms, and removable devices are not displayed!
 #"
-#      mapfile -t v_selected_disks < <(whiptail --checklist --separate-output "$dialog_message" 30 100 $((${#menu_entries_option[@]} / 3)) "${menu_entries_option[@]}" 3>&1 1>&2 2>&3)
-#
-#      if [[ ${#v_selected_disks[@]} -gt 0 ]]; then
-#        break
-#      fi
-#    done
-#  fi
-#
-#  print_variables v_selected_disks
-#}
+			mapfile -t v_selected_disks < <(whiptail --radiolist --separate-output "$dialog_message" 30 100 $((${#menu_entries_option[@]} / 3)) "${menu_entries_option[@]}" 3>&1 1>&2 2>&3)
+
+			if [[ ${#v_selected_disks[@]} -gt 0 ]]; then
+				break
+			fi
+		done
+	fi
+
+	print_variables v_selected_disks
+}
 
 select_pools_raid_type () {
   print_step_info_header
