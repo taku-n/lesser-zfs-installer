@@ -421,7 +421,7 @@ If you think this is a bug, please open an issue on https://github.com/taku-n/on
 #
 #Devices with mounted partitions, cdroms, and removable devices are not displayed!
 #"
-		mapfile -t v_selected_disks < <(whiptail --menu --separate-output "$dialog_message" 30 100 $((${#menu_entries_option[@]} / 3)) "${menu_entries_option[@]}" 3>&1 1>&2 2>&3)
+		mapfile -t v_selected_disks < <(whiptail --menu --separate-output "$dialog_message" 30 100 10 "${menu_entries_option[@]}" 3>&1 1>&2 2>&3)
 
 		if [[ ${#v_selected_disks[@]} -gt 0 ]]; then
 			break
