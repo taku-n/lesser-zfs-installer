@@ -29,7 +29,7 @@ set -o nounset
 
 # Variables set by the script
 
-v_linux_distribution=        # Ubuntu, ... WATCH OUT: not necessarily from `lsb_release` (ie. UbuntuServer)
+linux_distribution=  # Ubuntu, ... WATCH OUT: not necessarily from `lsb_release` (ie. UbuntuServer)
 
 # Variables set (indirectly) by the user
 #
@@ -39,8 +39,11 @@ v_linux_distribution=        # Ubuntu, ... WATCH OUT: not necessarily from `lsb_
 #
 # Note that `ZFS_PASSPHRASE` and `ZFS_POOLS_RAID_TYPE` consider the unset state (see help).
 
+selected_disk=  # /dev/disk/by-id/...
+swap_size=
+bpool_name=bpool
 v_bpool_tweaks=              # array; see defaults below for format
-v_root_password=             # Debian-only
+rpool_name=rpool
 v_rpool_tweaks=              # array; see defaults below for format
 v_pools_raid_type=
 v_free_tail_space=           # integer
@@ -92,9 +95,7 @@ function main {
 	display_intro_banner
 	create_passphrase_named_pipe
 
-	local selected_disk  # /dev/disk/by-id/...
 	select_disk
-	local swap_size
 	ask_swap_size
 	ask_pool_tweaks
 
@@ -102,14 +103,12 @@ function main {
 	setup_partitions
 
 	# Includes the O/S extra configuration, if necessary (network, root pwd, etc.)
-	if [[ $v_linux_distribution = "Ubuntu" ]]; then
+	if [[ $linux_distribution = "Ubuntu" ]]; then
 		install_operating_system
 	else
 		install_operating_system_UbuntuServer
 	fi
 
-	local bpool_name="bpool"
-	local rpool_name="rpool"
 	create_pools
 	create_swap_volume
 	sync_os_temp_installation_dir_to_rpool
@@ -223,10 +222,10 @@ function activate_debug {
 }
 
 function set_distribution_data {
-	v_linux_distribution="$(lsb_release --id --short)"
+	linux_distribution="$(lsb_release --id --short)"
 
-	if [[ "$v_linux_distribution" == "Ubuntu" ]] && grep -q '^Status: install ok installed$' < <(dpkg -s ubuntu-server 2> /dev/null); then
-		v_linux_distribution="UbuntuServer"
+	if [[ "$linux_distribution" == "Ubuntu" ]] && grep -q '^Status: install ok installed$' < <(dpkg -s ubuntu-server 2> /dev/null); then
+		linux_distribution="UbuntuServer"
 	fi
 
 	v_linux_version="$(lsb_release --release --short)"
@@ -267,11 +266,11 @@ function check_prerequisites {
   elif [ "${ZFS_OS_INSTALLATION_SCRIPT:-}" != "" && ! -x "$ZFS_OS_INSTALLATION_SCRIPT" ]; then
     echo "The custom O/S installation script provided doesn't exist or is not executable!"
     exit 1
-  elif [ ! -v c_supported_linux_distributions["$v_linux_distribution"] ]; then
-    echo "This Linux distribution ($v_linux_distribution) is not supported!"
+  elif [ ! -v c_supported_linux_distributions["$linux_distribution"] ]; then
+    echo "This Linux distribution ($linux_distribution) is not supported!"
     exit 1
-  elif [ ! ${c_supported_linux_distributions["$v_linux_distribution"]} =~ $distro_version_regex ]; then
-    echo "This Linux distribution version ($v_linux_version) is not supported; supported versions: ${c_supported_linux_distributions["$v_linux_distribution"]}"
+  elif [ ! ${c_supported_linux_distributions["$linux_distribution"]} =~ $distro_version_regex ]; then
+    echo "This Linux distribution version ($v_linux_version) is not supported; supported versions: ${c_supported_linux_distributions["$linux_distribution"]}"
     exit 1
   fi
 
