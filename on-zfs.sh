@@ -82,6 +82,11 @@ c_zfs_module_version_log=$c_log_dir/updated_module_versions.log
 c_udevadm_settle_timeout=10 # seconds
 
 function main {
+	stage1
+	stage2
+}
+
+function stage1 {
 	apt update
 	apt full-upgrade -y
 	apt install -y python-is-python3
@@ -108,7 +113,9 @@ function main {
 	else
 		install_operating_system_UbuntuServer
 	fi
+}
 
+function stage2 {
 	create_pools
 	create_swap_volume
 	sync_os_temp_installation_dir_to_rpool
@@ -387,7 +394,7 @@ If you think this is a bug, please open an issue on https://github.com/taku-n/on
 function ask_swap_size {
 	print_step_info_header ask_swap_size
 
-	local swap_size_invalid_message
+	local swap_size_invalid_message=
 
 	while [[ ! $swap_size =~ ^[0-9]+$ ]]; do
 		swap_size=$(whiptail --inputbox "${swap_size_invalid_message}Enter the swap size in GiB (0 for no swap):" 30 100 2 3>&1 1>&2 2>&3)
@@ -862,9 +869,13 @@ You now need to perform a hard reset, then enjoy your ZFS system :-)"
   fi
 }
 
-# サブコマンド main
+# サブコマンド
 if [[ " $1" = " main" ]]; then
 	main
+elif [[ " $1" = " stage1" ]]; then
+	stage1
+elif [[ " $1" = " stage2" ]]; then
+	stage2
 fi
 
 # 未定義のサブコマンドなら help を表示して終了
