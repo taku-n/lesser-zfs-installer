@@ -39,20 +39,15 @@ v_linux_distribution=        # Ubuntu, ... WATCH OUT: not necessarily from `lsb_
 #
 # Note that `ZFS_PASSPHRASE` and `ZFS_POOLS_RAID_TYPE` consider the unset state (see help).
 
-v_bpool_name=
 v_bpool_tweaks=              # array; see defaults below for format
 v_root_password=             # Debian-only
-v_rpool_name=
 v_rpool_tweaks=              # array; see defaults below for format
 v_pools_raid_type=
-declare -a v_selected_disks  # (/dev/by-id/disk_id, ...)
-v_swap_size=                 # integer
 v_free_tail_space=           # integer
 
 # Variables set during execution
 
 v_temp_volume_device=        # /dev/zdN; scope: setup_partitions -> sync_os_temp_installation_dir_to_rpool
-v_suitable_disks=()          # (/dev/by-id/disk_id, ...); scope: find_suitable_disks -> select_disk
 
 # Constants
 
@@ -97,30 +92,28 @@ function main {
 	display_intro_banner
 	create_passphrase_named_pipe
 
-	local suitable_disks
-	local selected_disk
-	select_disks
+	local selected_disk  # /dev/disk/by-id/...
+	select_disk
+	local swap_size
 	ask_swap_size
 	ask_pool_tweaks
 
 	install_host_packages
 	setup_partitions
 
-	if [[ "${ZFS_OS_INSTALLATION_SCRIPT:-}" == "" ]]; then
-		# Includes the O/S extra configuration, if necessary (network, root pwd, etc.)
-		distro_dependent_invoke "install_operating_system"
-
-		create_pools
-		create_swap_volume
-		sync_os_temp_installation_dir_to_rpool
-		remove_temp_partition_and_expand_rpool
+	# Includes the O/S extra configuration, if necessary (network, root pwd, etc.)
+	if [[ $v_linux_distribution = "Ubuntu" ]]; then
+		install_operating_system
 	else
-		create_pools
-		create_swap_volume
-		remove_temp_partition_and_expand_rpool
-
-		custom_install_operating_system
+		install_operating_system_UbuntuServer
 	fi
+
+	local bpool_name="bpool"
+	local rpool_name="rpool"
+	create_pools
+	create_swap_volume
+	sync_os_temp_installation_dir_to_rpool
+	remove_temp_partition_and_expand_rpool
 
 	prepare_jail
 	install_jail_zfs_packages
@@ -135,40 +128,6 @@ function main {
 }
 
 # HELPER FUNCTIONS #############################################################
-
-# Chooses a function and invokes it depending on the O/S distribution.
-#
-# Example:
-#
-#   $ function install_jail_zfs_packages { :; }
-#   $ function install_jail_zfs_packages_Debian { :; }
-#   $ distro_dependent_invoke "install_jail_zfs_packages"
-#
-# If the distribution is `Debian`, the second will be invoked, otherwise, the
-# first.
-#
-# If the function is invoked with `--noforce` as second parameter, and there is
-# no matching function:
-#
-#   $ function update_zed_cache_Ubuntu { :; }
-#   $ distro_dependent_invoke "install_jail_zfs_packages" --noforce
-#
-# then nothing happens. Without `--noforce`, this invocation will cause an
-# error.
-#
-function distro_dependent_invoke {
-  local distro_specific_fx_name="$1_$v_linux_distribution"
-
-  if declare -f "$distro_specific_fx_name" > /dev/null; then
-    "$distro_specific_fx_name"
-  else
-    if ! declare -f "$1" > /dev/null && [[ "${2:-}" == "--noforce" ]]; then
-      : # do nothing
-    else
-      "$1"
-    fi
-  fi
-}
 
 # shellcheck disable=SC2120 # allow parameters passing even if no calls pass any
 function print_step_info_header {
@@ -350,8 +309,8 @@ function create_passphrase_named_pipe {
   mkfifo "$c_passphrase_named_pipe"
 }
 
-function select_disks {
-	print_step_info_header select_disks
+function select_disk {
+	print_step_info_header select_disk
 
 	# In some freaky cases, `/dev/disk/by-id` is not up to date, so we refresh. One case is
 	# after starting a VirtualBox VM that is a full clone of a suspended VM with snapshots.
@@ -364,6 +323,7 @@ function select_disks {
 	# The options are either using this strategy, or adding a conditional.
 	local candidate_disk_ids=$(find /dev/disk/by-id -regextype awk -regex '.+/(ata|nvme|scsi|mmc)-.+' -not -regex '.+-part[0-9]+$' | sort)
 	local mounted_devices="$(df | awk 'BEGIN {getline} {print $1}' | xargs -n 1 lsblk -no pkname 2> /dev/null | sort -u || true)"
+	local suitable_disks=()  # /dev/disk/by-id/...
 
 	while read -r disk_id || [ -n "$disk_id" ]; do
 		local device_info="$(udevadm info --query=property "$(readlink -f "$disk_id")")"
@@ -381,7 +341,7 @@ function select_disks {
 		if ! grep -q '^ID_TYPE=cd$' <<< "$device_info"; then  # 光学ドライブではない
 			# マウントされていない
 			if ! grep -q "^$block_device_basename\$" <<< "$mounted_devices"; then
-				v_suitable_disks+=("$disk_id")
+				suitable_disks+=("$disk_id")
 			fi
 		fi
 
@@ -395,7 +355,7 @@ LOG
 
 	done < <(echo -n "$candidate_disk_ids")
 
-	if [ ${#v_suitable_disks[@]} -eq 0 ]; then
+	if [ ${#suitable_disks[@]} -eq 0 ]; then
 		local dialog_message='No suitable disks have been found!
 
 If you'\''re running inside a VMWare virtual machine, you need to add set `disk.EnableUUID = "TRUE"` in the .vmx configuration file.
@@ -407,46 +367,36 @@ If you think this is a bug, please open an issue on https://github.com/taku-n/on
 		exit 1
 	fi
 
-	print_variables v_suitable_disks
+	print_variables suitable_disks
 
-	while true; do
-		local menu_entries_option
+	local menu_entries_option
 
-		for disk_id in "${v_suitable_disks[@]}"; do
-			local block_device_basename="$(basename "$(readlink -f "$disk_id")")"
-			menu_entries_option+=("$disk_id" "($block_device_basename)")
-		done
+	for disk_id in "${suitable_disks[@]}"; do
+		local block_device_basename="$(basename "$(readlink -f "$disk_id")")"
+		menu_entries_option+=("$disk_id" "($block_device_basename)")
+	done
 
-		local dialog_message="ZFS を構築するデバイスを選択してください。
+	local dialog_message="ZFS を構築するデバイスを選択してください。
 #
 #Devices with mounted partitions, cdroms, and removable devices are not displayed!
 #"
-		mapfile -t v_selected_disks < <(whiptail --menu --separate-output "$dialog_message" 30 100 10 "${menu_entries_option[@]}" 3>&1 1>&2 2>&3)
+	selected_disk=$(whiptail --menu --separate-output "$dialog_message" 30 100 10 "${menu_entries_option[@]}" 3>&1 1>&2 2>&3)
 
-		if [[ ${#v_selected_disks[@]} -gt 0 ]]; then
-			break
-		fi
-	done
-
-	print_variables v_selected_disks
+	print_variables selected_disk
 }
 
 function ask_swap_size {
-  print_step_info_header ask_swap_size
+	print_step_info_header ask_swap_size
 
-  if [[ ${ZFS_SWAP_SIZE:-} != "" ]]; then
-    v_swap_size=$ZFS_SWAP_SIZE
-  else
-   local swap_size_invalid_message=
+	local swap_size_invalid_message
 
-    while [[ ! $v_swap_size =~ ^[0-9]+$ ]]; do
-      v_swap_size=$(whiptail --inputbox "${swap_size_invalid_message}Enter the swap size in GiB (0 for no swap):" 30 100 2 3>&1 1>&2 2>&3)
+	while [[ ! $swap_size =~ ^[0-9]+$ ]]; do
+		swap_size=$(whiptail --inputbox "${swap_size_invalid_message}Enter the swap size in GiB (0 for no swap):" 30 100 2 3>&1 1>&2 2>&3)
 
-      swap_size_invalid_message="Invalid swap size! "
-    done
-  fi
+		swap_size_invalid_message="Invalid swap size! "
+	done
 
-  print_variables v_swap_size
+	print_variables swap_size
 }
 
 function ask_pool_tweaks {
@@ -472,60 +422,51 @@ function install_host_packages {
 }
 
 function setup_partitions {
-  print_step_info_header setup_partitions
+	print_step_info_header setup_partitions
 
-  local temporary_partition_start=-$((${c_temporary_volume_size:0:-1} + v_free_tail_space))G
+	local temporary_partition_start=-$((${c_temporary_volume_size:0:-1} + v_free_tail_space))G
+	local tail_space_start=0
 
-  if [[ $v_free_tail_space -eq 0 ]]; then
-    local tail_space_start=0
-  else
-    local tail_space_start="-${v_free_tail_space}G"
-  fi
+	# More thorough than `sgdisk --zap-all`.
+	#
+	wipefs --all "$selected_disk"
 
-  for selected_disk in "${v_selected_disks[@]}"; do
-    # More thorough than `sgdisk --zap-all`.
-    #
-    wipefs --all "$selected_disk"
+	sgdisk -n1:1M:+"$c_boot_partition_size"   -t1:EF00 "$selected_disk" # EFI boot
+	sgdisk -n2:0:+"$c_boot_partition_size"    -t2:BF01 "$selected_disk" # Boot pool
+	sgdisk -n3:0:"$temporary_partition_start" -t3:BF01 "$selected_disk" # Root pool
+	sgdisk -n4:0:"$tail_space_start"          -t4:8300 "$selected_disk" # Temporary partition
 
-    sgdisk -n1:1M:+"$c_boot_partition_size"   -t1:EF00 "$selected_disk" # EFI boot
-    sgdisk -n2:0:+"$c_boot_partition_size"    -t2:BF01 "$selected_disk" # Boot pool
-    sgdisk -n3:0:"$temporary_partition_start" -t3:BF01 "$selected_disk" # Root pool
-    sgdisk -n4:0:"$tail_space_start"          -t4:8300 "$selected_disk" # Temporary partition
-  done
+	# The partition symlinks are not immediately created, so we wait.
+	#
+	# There is still a hard to reproduce issue where `zpool create rpool` fails with:
+	#
+	#   cannot resolve path '/dev/disk/by-id/<disk_id>-part2'
+	#
+	# It's a race condition (waiting more solves the problem), but it's not clear which exact event
+	# to wait on.
+	# There's no relation to the missing symlinks - the issue also happened for partitions that
+	# didn't need a `sleep`.
+	#
+	# Using `partprobe` doesn't solve the problem.
+	#
+	# Replacing the `-L` test with `-e` is a potential solution, but couldn't check on the
+	# destination files, due to the nondeterministic nature of the problem.
+	#
+	# Current attempt: `udevadm`, which should be the cleanest approach.
+	#
+	udevadm settle --timeout "$c_udevadm_settle_timeout" || true
 
-  # The partition symlinks are not immediately created, so we wait.
-  #
-  # There is still a hard to reproduce issue where `zpool create rpool` fails with:
-  #
-  #   cannot resolve path '/dev/disk/by-id/<disk_id>-part2'
-  #
-  # It's a race condition (waiting more solves the problem), but it's not clear which exact event
-  # to wait on.
-  # There's no relation to the missing symlinks - the issue also happened for partitions that
-  # didn't need a `sleep`.
-  #
-  # Using `partprobe` doesn't solve the problem.
-  #
-  # Replacing the `-L` test with `-e` is a potential solution, but couldn't check on the
-  # destination files, due to the nondeterministic nature of the problem.
-  #
-  # Current attempt: `udevadm`, which should be the cleanest approach.
-  #
-  udevadm settle --timeout "$c_udevadm_settle_timeout" || true
+	# for disk in "${selected_disk[@]}"; do
+	#   part_indexes=(1 2 3)
+	#
+	#   for part_i in "${part_indexes[@]}"; do
+	#     while [[ ! -L "${disk}-part${part_i}" ]]; do sleep 0.25; done
+	#   done
+	# done
 
-  # for disk in "${v_selected_disks[@]}"; do
-  #   part_indexes=(1 2 3)
-  #
-  #   for part_i in "${part_indexes[@]}"; do
-  #     while [[ ! -L "${disk}-part${part_i}" ]]; do sleep 0.25; done
-  #   done
-  # done
+	mkfs.fat -F 32 -n EFI "${selected_disk}-part1"
 
-  for selected_disk in "${v_selected_disks[@]}"; do
-    mkfs.fat -F 32 -n EFI "${selected_disk}-part1"
-  done
-
-  v_temp_volume_device=$(readlink -f "${v_selected_disks[0]}-part4")
+	v_temp_volume_device=$(readlink -f "${selected_disk}-part4")
 }
 
 function install_operating_system {
@@ -581,7 +522,7 @@ function install_operating_system_UbuntuServer {
 
   local dialog_message='You'\''ll now need to run the Ubuntu Server installer (Subiquity).
 
-Switch back to the original terminal (Ctrl+Shift+F1), then proceed with the configuration as usual.
+Switch back to the original terminal (Alt + F1), then proceed with the configuration as usual.
 
 When the update option is presented, choose to update Subiquity to the latest version.
 
@@ -593,7 +534,7 @@ At the partitioning stage:
   - click `Save`
 - click `Done` -> `Continue` (ignore warning)
 - follow through the installation, until the end (after the updates are applied)
-- switch back to this terminal (Ctrl+Alt+F2), and continue (tap Enter)
+- switch back to this terminal (Alt + F2), and continue (tap Enter)
 
 Do not continue in this terminal (tap Enter) now!
 
@@ -612,12 +553,6 @@ You can switch anytime to this terminal, and back, in order to read the instruct
   fi
 
   rm -f "$c_installed_os_data_mount_dir"/swap.img
-}
-
-function custom_install_operating_system {
-  print_step_info_header custom_install_operating_system
-
-  sudo "$ZFS_OS_INSTALLATION_SCRIPT"
 }
 
 function create_pools {
@@ -642,10 +577,8 @@ function create_pools {
 
   set -x
 
-  for selected_disk in "${v_selected_disks[@]}"; do
-    rpool_disks_partitions+=("${selected_disk}-part3")
-    bpool_disks_partitions+=("${selected_disk}-part2")
-  done
+	rpool_disks_partitions+=("${selected_disk}-part3")
+	bpool_disks_partitions+=("${selected_disk}-part2")
 
   # POOLS CREATION #####################
 
@@ -663,7 +596,7 @@ function create_pools {
     "${encryption_options[@]}" \
     "${v_rpool_tweaks[@]}" \
     -O devices=off -O mountpoint=/ -R "$c_zfs_mount_dir" -f \
-    "$v_rpool_name" $v_pools_raid_type "${rpool_disks_partitions[@]}" \
+    "$rpool_name" $v_pools_raid_type "${rpool_disks_partitions[@]}" \
     < "$c_passphrase_named_pipe"
 
   # `-d` disable all the pool features (not used here);
@@ -672,17 +605,17 @@ function create_pools {
   zpool create \
     "${v_bpool_tweaks[@]}" \
     -O devices=off -O mountpoint=/boot -R "$c_zfs_mount_dir" -f \
-    "$v_bpool_name" $v_pools_raid_type "${bpool_disks_partitions[@]}"
+    "$bpool_name" $v_pools_raid_type "${bpool_disks_partitions[@]}"
 }
 
 function create_swap_volume {
-  if [[ $v_swap_size -gt 0 ]]; then
+  if [[ $swap_size -gt 0 ]]; then
     zfs create \
-      -V "${v_swap_size}G" -b "$(getconf PAGESIZE)" \
+      -V "${swap_size}G" -b "$(getconf PAGESIZE)" \
       -o compression=zle -o logbias=throughput -o sync=always -o primarycache=metadata -o secondarycache=none -o com.sun:auto-snapshot=false \
-      "$v_rpool_name/swap"
+      "$rpool_name/swap"
 
-    mkswap -f "/dev/zvol/$v_rpool_name/swap"
+    mkswap -f "/dev/zvol/$rpool_name/swap"
   fi
 }
 
@@ -721,19 +654,13 @@ function sync_os_temp_installation_dir_to_rpool {
 }
 
 function remove_temp_partition_and_expand_rpool {
-  print_step_info_header remove_temp_partition_and_expand_rpool
+	print_step_info_header remove_temp_partition_and_expand_rpool
 
-  if [[ $v_free_tail_space -eq 0 ]]; then
-    local resize_reference=100%
-  else
-    local resize_reference=-${v_free_tail_space}G
-  fi
+	local resize_reference=100%
 
-  for selected_disk in "${v_selected_disks[@]}"; do
-    parted -s "$selected_disk" rm 4
-    parted -s "$selected_disk" unit s resizepart 3 -- "$resize_reference"
-    zpool online -e "$v_rpool_name" "$selected_disk-part3"
-  done
+	parted -s "$selected_disk" rm 4
+	parted -s "$selected_disk" unit s resizepart 3 -- "$resize_reference"
+	zpool online -e "$rpool_name" "$selected_disk-part3"
 }
 
 function prepare_jail {
@@ -767,14 +694,14 @@ function install_jail_zfs_packages {
 function install_and_configure_bootloader {
   print_step_info_header install_and_configure_bootloader
 
-  chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${v_selected_disks[0]}-part1") /boot/efi vfat nofail,x-systemd.device-timeout=1 0 1 > /etc/fstab"
+  chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${selected_disk[0]}-part1") /boot/efi vfat nofail,x-systemd.device-timeout=1 0 1 > /etc/fstab"
 
   chroot_execute "mkdir -p /boot/efi"
   chroot_execute "mount /boot/efi"
 
   chroot_execute "grub-install"
 
-  chroot_execute "perl -i -pe 's/(GRUB_CMDLINE_LINUX=\")/\${1}root=ZFS=$v_rpool_name /'    /etc/default/grub"
+  chroot_execute "perl -i -pe 's/(GRUB_CMDLINE_LINUX=\")/\${1}root=ZFS=$rpool_name /'    /etc/default/grub"
 
   # Silence warning during the grub probe (source: https://git.io/JenXF).
   #
@@ -800,30 +727,28 @@ function install_and_configure_bootloader {
 }
 
 function sync_efi_partitions {
-  print_step_info_header sync_efi_partitions
+	print_step_info_header sync_efi_partitions
 
-  for ((i = 1; i < ${#v_selected_disks[@]}; i++)); do
-    local synced_efi_partition_path="/boot/efi$((i + 1))"
+	local synced_efi_partition_path="/boot/efi$((2))"
 
-    chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${v_selected_disks[i]}-part1") $synced_efi_partition_path vfat nofail,x-systemd.device-timeout=1 0 1 >> /etc/fstab"
+	chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${selected_disk}-part1") $synced_efi_partition_path vfat nofail,x-systemd.device-timeout=1 0 1 >> /etc/fstab"
 
-    chroot_execute "mkdir -p $synced_efi_partition_path"
-    chroot_execute "mount $synced_efi_partition_path"
+	chroot_execute "mkdir -p $synced_efi_partition_path"
+	chroot_execute "mount $synced_efi_partition_path"
 
-   chroot_execute "rsync --archive --delete --verbose /boot/efi/ $synced_efi_partition_path"
+	chroot_execute "rsync --archive --delete --verbose /boot/efi/ $synced_efi_partition_path"
 
-    efibootmgr --create --disk "${v_selected_disks[i]}" --label "ubuntu-$((i + 1))" --loader '\EFI\ubuntu\grubx64.efi'
+	efibootmgr --create --disk "${selected_disk}" --label "ubuntu-$((2))" --loader '\EFI\ubuntu\grubx64.efi'
 
-    chroot_execute "umount $synced_efi_partition_path"
-  done
+	chroot_execute "umount $synced_efi_partition_path"
 
-  chroot_execute "umount /boot/efi"
+	chroot_execute "umount /boot/efi"
 }
 
 function configure_boot_pool_import {
   print_step_info_header configure_boot_pool_import
 
-  chroot_execute "cat > /etc/systemd/system/zfs-import-$v_bpool_name.service <<UNIT
+  chroot_execute "cat > /etc/systemd/system/zfs-import-$bpool_name.service <<UNIT
 [Unit]
 DefaultDependencies=no
 Before=zfs-import-scan.service
@@ -833,17 +758,17 @@ Before=zfs-import-cache.service
 Type=oneshot
 RemainAfterExit=yes
 ExecStartPre=/bin/sh -c '[ -f /etc/zfs/zpool.cache ] && mv /etc/zfs/zpool.cache /etc/zfs/preboot_zpool.cache || true'
-ExecStart=/sbin/zpool import -N -o cachefile=none $v_bpool_name
+ExecStart=/sbin/zpool import -N -o cachefile=none $bpool_name
 ExecStartPost=/bin/sh -c '[ -f /etc/zfs/preboot_zpool.cache ] && mv /etc/zfs/preboot_zpool.cache /etc/zfs/zpool.cache || true'
 
 [Install]
 WantedBy=zfs-import.target
 UNIT"
 
-  chroot_execute "systemctl enable zfs-import-$v_bpool_name.service"
+  chroot_execute "systemctl enable zfs-import-$bpool_name.service"
 
-  chroot_execute "zfs set mountpoint=legacy $v_bpool_name"
-  chroot_execute "echo $v_bpool_name /boot zfs nodev,relatime,x-systemd.requires=zfs-import-$v_bpool_name.service 0 0 >> /etc/fstab"
+  chroot_execute "zfs set mountpoint=legacy $bpool_name"
+  chroot_execute "echo $bpool_name /boot zfs nodev,relatime,x-systemd.requires=zfs-import-$bpool_name.service 0 0 >> /etc/fstab"
 }
 
 # We don't care about synchronizing with the `fstrim` service for two reasons:
@@ -863,8 +788,8 @@ ConditionVirtualization=!container
 
 [Service]
 Type=oneshot
-ExecStart=/sbin/zpool trim $v_bpool_name
-ExecStart=/sbin/zpool trim $v_rpool_name
+ExecStart=/sbin/zpool trim $bpool_name
+ExecStart=/sbin/zpool trim $rpool_name
 UNIT"
 
   chroot_execute "  cat > /lib/systemd/system/zfs-trim.timer << TIMER
@@ -888,7 +813,7 @@ TIMER"
 function configure_remaining_settings {
   print_step_info_header configure_remaining_settings
 
-  [[ $v_swap_size -gt 0 ]] && chroot_execute "echo /dev/zvol/$v_rpool_name/swap none swap discard 0 0 >> /etc/fstab" || true
+  [[ $swap_size -gt 0 ]] && chroot_execute "echo /dev/zvol/$rpool_name/swap none swap discard 0 0 >> /etc/fstab" || true
   chroot_execute "echo RESUME=none > /etc/initramfs-tools/conf.d/resume"
 }
 
