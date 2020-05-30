@@ -52,8 +52,8 @@ v_temp_volume_device=        # /dev/zdN; scope: setup_partitions -> sync_os_temp
 
 # Constants
 
-c_default_bpool_tweaks="-o ashift=12"
-c_default_rpool_tweaks="-o ashift=12 -O acltype=posixacl -O compression=lz4 -O dnodesize=auto -O relatime=on -O xattr=sa -O normalization=formD"
+c_default_bpool_tweaks=
+c_default_rpool_tweaks=
 c_zfs_mount_dir=/mnt
 c_installed_os_data_mount_dir=/target
 declare -A c_supported_linux_distributions=([Ubuntu]="20.04" [UbuntuServer]="20.04")
@@ -395,17 +395,13 @@ function ask_swap_size {
 }
 
 function ask_pool_tweaks {
-  print_step_info_header ask_pool_tweaks
+	print_step_info_header ask_pool_tweaks
 
-  local raw_bpool_tweaks=${ZFS_BPOOL_TWEAKS:-$(whiptail --inputbox "Insert the tweaks for the boot pool" 30 100 -- "$c_default_bpool_tweaks" 3>&1 1>&2 2>&3)}
+	v_bpool_tweaks=$(whiptail --inputbox "Insert the tweaks for the boot pool" 30 100 -- "$c_default_bpool_tweaks" 3>&1 1>&2 2>&3)
 
-  mapfile -d' ' -t v_bpool_tweaks < <(echo -n "$raw_bpool_tweaks")
+	v_rpool_tweaks=${ZFS_RPOOL_TWEAKS:-$(whiptail --inputbox "Insert the tweaks for the root pool" 30 100 -- "$c_default_rpool_tweaks" 3>&1 1>&2 2>&3)}
 
-  local raw_rpool_tweaks=${ZFS_RPOOL_TWEAKS:-$(whiptail --inputbox "Insert the tweaks for the root pool" 30 100 -- "$c_default_rpool_tweaks" 3>&1 1>&2 2>&3)}
-
-  mapfile -d' ' -t v_rpool_tweaks < <(echo -n "$raw_rpool_tweaks")
-
-  print_variables v_bpool_tweaks v_rpool_tweaks
+	print_variables v_bpool_tweaks v_rpool_tweaks
 }
 
 function install_host_packages {
@@ -554,11 +550,8 @@ function create_pools {
 
 	# POOL OPTIONS #######################
 
-	local rpool_disks_partitions=()
-	local bpool_disks_partitions=()
-
-	bpool_disks_partitions+=("${selected_disk}-part3")
-	rpool_disks_partitions+=("${selected_disk}-part4")
+	local bpool_disks_partitions="${selected_disk}-part3"
+	local rpool_disks_partitions="${selected_disk}-part4"
 
 	# POOLS CREATION #####################
 
@@ -575,18 +568,24 @@ function create_pools {
 
 	echo "zpool create begins"
 
+	echo "\$v_bpool_tweaks is $v_bpool_tweaks"
+	echo "\$c_zfs_mount_dir is $c_zfs_mount_dir"
+	echo "\$bpool_name is $bpool_name"
+	echo "\$bpool_disks_partition is $bpool_disks_partition"
 	# `-d` disable all the pool features (not used here);
 	#
 	# shellcheck disable=SC2086 # see above
-	zpool create \
-			"${v_bpool_tweaks[@]}" \
-			-O devices=off -O mountpoint=/boot -R "$c_zfs_mount_dir" -f \
-			"$bpool_name" "${bpool_disks_partitions[@]}"  # bpool
+	zpool create ${v_bpool_tweaks} \
+			-O mountpoint=/boot -R "$c_zfs_mount_dir" -f \
+			"$bpool_name" "${bpool_disks_partition}"  # bpool
 
-	zpool create \
-			"${v_rpool_tweaks[@]}" \
-			-O devices=off -O mountpoint=/ -R "$c_zfs_mount_dir" -f \
-			"$rpool_name" "${rpool_disks_partitions[@]}"  # rpool
+	echo "\$v_rpool_tweaks is $v_rpool_tweaks"
+	echo "\$c_zfs_mount_dir is $c_zfs_mount_dir"
+	echo "\$rpool_name is $rpool_name"
+	echo "\$rpool_disks_partition is $rpool_disks_partition"
+	zpool create ${v_rpool_tweaks} \
+			-O mountpoint=/ -R "$c_zfs_mount_dir" -f \
+			"$rpool_name" "${rpool_disks_partition}"  # rpool
 
 	echo "zpool create ends"
 	echo "function create_pools ends"
