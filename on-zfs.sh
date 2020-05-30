@@ -45,8 +45,6 @@ bpool_name=bpool
 v_bpool_tweaks=              # array; see defaults below for format
 rpool_name=rpool
 v_rpool_tweaks=              # array; see defaults below for format
-v_pools_raid_type=
-v_free_tail_space=           # integer
 
 # Variables set during execution
 
@@ -59,9 +57,9 @@ c_default_rpool_tweaks="-o ashift=12 -O acltype=posixacl -O compression=lz4 -O d
 c_zfs_mount_dir=/mnt
 c_installed_os_data_mount_dir=/target
 declare -A c_supported_linux_distributions=([Ubuntu]="20.04" [UbuntuServer]="20.04")
-c_boot_partition_size=768M   # while 512M are enough for a few kernels, the Ubuntu updater complains after a couple
-c_temporary_volume_size=12G  # large enough; Debian, for example, takes ~8 GiB.
-c_passphrase_named_pipe=$(dirname "$(mktemp)")/zfs-installer.pp.fifo
+EFI_SYSTEM_PARTITION_SIZE=1G
+BPOOL_PARTITION_SIZE=1G
+TEMPORARY_VOLUME_SIZE=12G  # large enough; Debian, for example, takes ~8 GiB.
 
 c_log_dir=$(mktemp -dp /tmp on-zfs_XXX)  # e.g. /tmp/on-zfs_xyz
 c_install_log=$c_log_dir/install.log
@@ -98,7 +96,6 @@ function stage1 {
 	check_prerequisites
 
 	display_intro_banner
-	create_passphrase_named_pipe
 
 	select_disk
 	ask_swap_size
@@ -117,7 +114,7 @@ function stage1 {
 
 function stage2 {
 	create_pools
-	create_swap_volume
+	create_zfs_partitions
 	sync_os_temp_installation_dir_to_rpool
 	remove_temp_partition_and_expand_rpool
 
@@ -304,17 +301,6 @@ In order to stop the procedure, hit Esc twice during dialogs (excluding yes/no o
 	whiptail --msgbox "$dialog_message" 30 100
 }
 
-# By using a FIFO, we avoid having to hide statements like `echo $v_passphrase | zpoool create ...`
-# from the logs.
-#
-# The FIFO file is left in the filesystem after the script exits. It's not worth taking care of
-# removing it, since the environment is entirely ephemeral.
-#
-function create_passphrase_named_pipe {
-  rm -f "$c_passphrase_named_pipe"
-  mkfifo "$c_passphrase_named_pipe"
-}
-
 function select_disk {
 	print_step_info_header select_disk
 
@@ -397,10 +383,13 @@ function ask_swap_size {
 	local swap_size_invalid_message=
 
 	while [[ ! $swap_size =~ ^[0-9]+$ ]]; do
-		swap_size=$(whiptail --inputbox "${swap_size_invalid_message}Enter the swap size in GiB (0 for no swap):" 30 100 2 3>&1 1>&2 2>&3)
+		swap_size=$(whiptail --inputbox "${swap_size_invalid_message}Enter the swap size in GiB (0 for no swap):
+(0 は現在非対応です)" 30 100 2 3>&1 1>&2 2>&3)
 
 		swap_size_invalid_message="Invalid swap size! "
 	done
+
+	swap_size=${swap_size}G
 
 	print_variables swap_size
 }
@@ -430,17 +419,15 @@ function install_host_packages {
 function setup_partitions {
 	print_step_info_header setup_partitions
 
-	local temporary_partition_start=-$((${c_temporary_volume_size:0:-1} + v_free_tail_space))G
-	local tail_space_start=0
-
 	# More thorough than `sgdisk --zap-all`.
 	#
 	wipefs --all "$selected_disk"
 
-	sgdisk -n1:1M:+"$c_boot_partition_size"   -t1:EF00 "$selected_disk" # EFI boot
-	sgdisk -n2:0:+"$c_boot_partition_size"    -t2:BF01 "$selected_disk" # Boot pool
-	sgdisk -n3:0:"$temporary_partition_start" -t3:BF01 "$selected_disk" # Root pool
-	sgdisk -n4:0:"$tail_space_start"          -t4:8300 "$selected_disk" # Temporary partition
+	sgdisk -n 1:1M:+"$EFI_SYSTEM_PARTITION_SIZE" -t 1:EF00 "$selected_disk" # EFI System
+	sgdisk -n 2::+"$swap_size"                   -t 2:8200 "$selected_disk" # Linux swap
+	sgdisk -n 3::+"$BPOOL_PARTITION_SIZE"        -t 3:BF01 "$selected_disk" # Mac ZFS (bpool)
+	sgdisk -n 4::+"$TEMPORARY_VOLUME_SIZE"       -t 4:BF01 "$selected_disk" # Mac ZFS (rpool)
+	sgdisk -n 5::                                -t 5:8300 "$selected_disk" # Linux File System
 
 	# The partition symlinks are not immediately created, so we wait.
 	#
@@ -470,9 +457,9 @@ function setup_partitions {
 	#   done
 	# done
 
-	mkfs.fat -F 32 -n EFI "${selected_disk}-part1"
+	mkfs.fat -F 32 -n ESP "${selected_disk}-part1"  # EFI System Partition (FAT32)
 
-	v_temp_volume_device=$(readlink -f "${selected_disk}-part4")
+	v_temp_volume_device=$(readlink -f "${selected_disk}-part5")
 }
 
 function install_operating_system {
@@ -526,25 +513,25 @@ function install_operating_system_UbuntuServer {
   # Subiquity is designed to prevent the user from opening a terminal, which is (to say the least)
   # incongruent with the audience.
 
-  local dialog_message='You'\''ll now need to run the Ubuntu Server installer (Subiquity).
+  local dialog_message='Ubuntu Server installer (Subiquity) を実行してください
 
-Switch back to the original terminal (Alt + F1), then proceed with the configuration as usual.
+Alt + F1 を押して元の端末に戻り，設定を進めてください
 
-When the update option is presented, choose to update Subiquity to the latest version.
+Subiquity をアップデートするか問われたなら，アップデートしてください
 
-At the partitioning stage:
+パーティションの設定では:
 
-- select `Custom storage layout` -> `Done`
-- select `'"$v_temp_volume_device"'` -> `Edit`
-  - set `Format:` to `ext4` (mountpoint will be automatically selected)
-  - click `Save`
-- click `Done` -> `Continue` (ignore warning)
-- follow through the installation, until the end (after the updates are applied)
-- switch back to this terminal (Alt + F2), and continue (tap Enter)
+- `Custom storage layout` -> `Done` を選択
+- `'"$v_temp_volume_device"'` -> `Edit` を選択
+  - `Format:` を `ext4` にします (mountpoint は自動で選択されます)
+  - `Save` を押します
+- `Done` -> `Continue` を押します (警告は無視してください)
+- インストールを終わらせます (最後に実行されるアップデートも済ませてください)
+- Alt + F2 を押してこの端末に戻り continue を押します
 
-Do not continue in this terminal (tap Enter) now!
+いまは Enter を押して continue しないでください!
 
-You can switch anytime to this terminal, and back, in order to read the instructions.
+この画面を見るためにいつでも端末を行き来できます
 '
 
   whiptail --msgbox "$dialog_message" 30 100
@@ -562,67 +549,63 @@ You can switch anytime to this terminal, and back, in order to read the instruct
 }
 
 function create_pools {
-  # POOL OPTIONS #######################
+	echo "function create_pools begins"
+	echo "\$selected_disk is $selected_disk"
 
-  local passphrase
-  local encryption_options=()
-  local rpool_disks_partitions=()
-  local bpool_disks_partitions=()
+	# POOL OPTIONS #######################
 
-  set +x
+	local rpool_disks_partitions=()
+	local bpool_disks_partitions=()
 
-  passphrase=$(cat "$c_passphrase_named_pipe")
+	bpool_disks_partitions+=("${selected_disk}-part3")
+	rpool_disks_partitions+=("${selected_disk}-part4")
 
-  if [[ -n $passphrase ]]; then
-    encryption_options=(-O "encryption=on" -O "keylocation=prompt" -O "keyformat=passphrase")
-  fi
+	# POOLS CREATION #####################
 
-  # Push back for unlogged reuse. Minor inconvenience, but worth :-)
-  #
-  echo -n "$passphrase" > "$c_passphrase_named_pipe" &
+	# See https://github.com/zfsonlinux/zfs/wiki/Ubuntu-18.04-Root-on-ZFS for the details.
+	#
+	# `-R` creates an "Alternate Root Point", which is lost on unmount; it's just a convenience for a temporary mountpoint;
+	# `-f` force overwrite partitions is existing - in some cases, even after wipefs, a filesystem is mistakenly recognized
+	# `-O` set filesystem properties on a pool (pools and filesystems are distincted entities, however, a pool includes an FS by default).
+	#
+	# Stdin is ignored if the encryption is not set (and set via prompt).
+	#
+	# shellcheck disable=SC2086 # quoting $v_pools_raid_type; barring invalid user input, the values are guaranteed not to
+	# need quoting.
 
-  set -x
+	echo "zpool create begins"
 
-	rpool_disks_partitions+=("${selected_disk}-part3")
-	bpool_disks_partitions+=("${selected_disk}-part2")
+	# `-d` disable all the pool features (not used here);
+	#
+	# shellcheck disable=SC2086 # see above
+	zpool create \
+			"${v_bpool_tweaks[@]}" \
+			-O devices=off -O mountpoint=/boot -R "$c_zfs_mount_dir" -f \
+			"$bpool_name" "${bpool_disks_partitions[@]}"  # bpool
 
-  # POOLS CREATION #####################
+	zpool create \
+			"${v_rpool_tweaks[@]}" \
+			-O devices=off -O mountpoint=/ -R "$c_zfs_mount_dir" -f \
+			"$rpool_name" "${rpool_disks_partitions[@]}"  # rpool
 
-  # See https://github.com/zfsonlinux/zfs/wiki/Ubuntu-18.04-Root-on-ZFS for the details.
-  #
-  # `-R` creates an "Alternate Root Point", which is lost on unmount; it's just a convenience for a temporary mountpoint;
-  # `-f` force overwrite partitions is existing - in some cases, even after wipefs, a filesystem is mistakenly recognized
-  # `-O` set filesystem properties on a pool (pools and filesystems are distincted entities, however, a pool includes an FS by default).
-  #
-  # Stdin is ignored if the encryption is not set (and set via prompt).
-  #
-  # shellcheck disable=SC2086 # quoting $v_pools_raid_type; barring invalid user input, the values are guaranteed not to
-  # need quoting.
-  zpool create \
-    "${encryption_options[@]}" \
-    "${v_rpool_tweaks[@]}" \
-    -O devices=off -O mountpoint=/ -R "$c_zfs_mount_dir" -f \
-    "$rpool_name" $v_pools_raid_type "${rpool_disks_partitions[@]}" \
-    < "$c_passphrase_named_pipe"
-
-  # `-d` disable all the pool features (not used here);
-  #
-  # shellcheck disable=SC2086 # see above
-  zpool create \
-    "${v_bpool_tweaks[@]}" \
-    -O devices=off -O mountpoint=/boot -R "$c_zfs_mount_dir" -f \
-    "$bpool_name" $v_pools_raid_type "${bpool_disks_partitions[@]}"
+	echo "zpool create ends"
+	echo "function create_pools ends"
 }
 
-function create_swap_volume {
-  if [[ $swap_size -gt 0 ]]; then
-    zfs create \
-      -V "${swap_size}G" -b "$(getconf PAGESIZE)" \
-      -o compression=zle -o logbias=throughput -o sync=always -o primarycache=metadata -o secondarycache=none -o com.sun:auto-snapshot=false \
-      "$rpool_name/swap"
+function create_zfs_partitions {
+	echo "create_zfs_partitions begins"
 
-    mkswap -f "/dev/zvol/$rpool_name/swap"
-  fi
+	zfs create -o mountpoint=/home           ${rpool_name}/home
+	zfs create -o mountpoint=/opt            ${rpool_name}/opt
+	zfs create -o mountpoint=/root           ${rpool_name}/root
+	zfs create -o mountpoint=/snap           ${rpool_name}/snap
+	zfs create -o mountpoint=/srv            ${rpool_name}/srv
+	zfs create -o mountpoint=/tmp            ${rpool_name}/tmp
+	zfs create -o mountpoint=/usr            ${rpool_name}/usr
+	zfs create -o mountpoint=/var            ${rpool_name}/var
+	zfs create -o mountpoint=/var/lib/docker ${rpool_name}/var/lib/docker
+
+	echo "create_zfs_partitions ends"
 }
 
 function sync_os_temp_installation_dir_to_rpool {
@@ -662,11 +645,9 @@ function sync_os_temp_installation_dir_to_rpool {
 function remove_temp_partition_and_expand_rpool {
 	print_step_info_header remove_temp_partition_and_expand_rpool
 
-	local resize_reference=100%
-
-	parted -s "$selected_disk" rm 4
-	parted -s "$selected_disk" unit s resizepart 3 -- "$resize_reference"
-	zpool online -e "$rpool_name" "$selected_disk-part3"
+	parted -s "$selected_disk" rm 5
+	parted -s "$selected_disk" unit s resizepart 4 -- "100%"
+	zpool online -e "$rpool_name" "$selected_disk-part4"
 }
 
 function prepare_jail {
@@ -700,7 +681,7 @@ function install_jail_zfs_packages {
 function install_and_configure_bootloader {
   print_step_info_header install_and_configure_bootloader
 
-  chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${selected_disk[0]}-part1") /boot/efi vfat nofail,x-systemd.device-timeout=1 0 1 > /etc/fstab"
+  chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${selected_disk}-part1") /boot/efi vfat nofail,x-systemd.device-timeout=1 0 1 > /etc/fstab"
 
   chroot_execute "mkdir -p /boot/efi"
   chroot_execute "mount /boot/efi"
@@ -735,7 +716,7 @@ function install_and_configure_bootloader {
 function sync_efi_partitions {
 	print_step_info_header sync_efi_partitions
 
-	local synced_efi_partition_path="/boot/efi$((2))"
+	local synced_efi_partition_path="/boot/efi2"
 
 	chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${selected_disk}-part1") $synced_efi_partition_path vfat nofail,x-systemd.device-timeout=1 0 1 >> /etc/fstab"
 
@@ -744,7 +725,7 @@ function sync_efi_partitions {
 
 	chroot_execute "rsync --archive --delete --verbose /boot/efi/ $synced_efi_partition_path"
 
-	efibootmgr --create --disk "${selected_disk}" --label "ubuntu-$((2))" --loader '\EFI\ubuntu\grubx64.efi'
+	efibootmgr --create --disk "${selected_disk}" --label "ubuntu-2" --loader '\EFI\ubuntu\grubx64.efi'
 
 	chroot_execute "umount $synced_efi_partition_path"
 
@@ -817,10 +798,12 @@ TIMER"
 }
 
 function configure_remaining_settings {
-  print_step_info_header configure_remaining_settings
+	print_step_info_header configure_remaining_settings
 
-  [[ $swap_size -gt 0 ]] && chroot_execute "echo /dev/zvol/$rpool_name/swap none swap discard 0 0 >> /etc/fstab" || true
-  chroot_execute "echo RESUME=none > /etc/initramfs-tools/conf.d/resume"
+	local block_device_basename=$(basename $(readlink -f $selected_disk))
+
+	[[ $swap_size -gt 0 ]] && chroot_execute "echo /dev/${block_device_basename}2 swap swap defaults 0 0 >> /etc/fstab" || true
+	chroot_execute "echo RESUME=none > /etc/initramfs-tools/conf.d/resume"
 }
 
 function prepare_for_system_exit {
@@ -860,9 +843,9 @@ function prepare_for_system_exit {
 function display_exit_banner {
   print_step_info_header display_exit_banner
 
-  local dialog_message="The system has been successfully prepared and installed.
+	local dialog_message="システムの準備ができました
 
-You now need to perform a hard reset, then enjoy your ZFS system :-)"
+システムを再起動してください ---- Enjoy your ZFS system :-)"
 
   if [[ ${ZFS_NO_INFO_MESSAGES:-} == "" ]]; then
     whiptail --msgbox "$dialog_message" 30 100
