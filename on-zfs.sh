@@ -121,7 +121,6 @@ function stage2 {
 	prepare_jail
 	install_jail_zfs_packages
 	install_and_configure_bootloader
-	sync_efi_partitions
 	configure_boot_pool_import
 	configure_pools_trimming
 	configure_remaining_settings
@@ -453,7 +452,7 @@ function setup_partitions {
 	#   done
 	# done
 
-	mkfs.fat -F 32 -n ESP "${selected_disk}-part1"  # EFI System Partition (FAT32)
+	mkfs.fat -F 32 -n esp "${selected_disk}-part1"  # EFI System Partition (FAT32)
 
 	v_temp_volume_device=$(readlink -f "${selected_disk}-part5")
 }
@@ -550,8 +549,8 @@ function create_pools {
 
 	# POOL OPTIONS #######################
 
-	local bpool_disks_partitions="${selected_disk}-part3"
 	local rpool_disks_partitions="${selected_disk}-part4"
+	local bpool_disks_partitions="${selected_disk}-part3"
 
 	# POOLS CREATION #####################
 
@@ -559,7 +558,7 @@ function create_pools {
 	#
 	# `-R` creates an "Alternate Root Point", which is lost on unmount; it's just a convenience for a temporary mountpoint;
 	# `-f` force overwrite partitions is existing - in some cases, even after wipefs, a filesystem is mistakenly recognized
-	# `-O` set filesystem properties on a pool (pools and filesystems are distincted entities, however, a pool includes an FS by default).
+	# `-O` set filesystem properties on a pool (pools and filesystems are distincted entities, however, プールは標準でひとつのファイルシステムを含む).
 	#
 	# Stdin is ignored if the encryption is not set (and set via prompt).
 	#
@@ -568,6 +567,17 @@ function create_pools {
 
 	echo "zpool create begins"
 
+	# rpool をつくってから bpool をつくる
+	# 逆だとマウントできなくなる
+
+	echo "\$v_rpool_tweaks is $v_rpool_tweaks"
+	echo "\$c_zfs_mount_dir is $c_zfs_mount_dir"
+	echo "\$rpool_name is $rpool_name"
+	echo "\$rpool_disks_partition is $rpool_disks_partition"
+	zpool create -f ${v_rpool_tweaks} \
+			-O mountpoint=/ -R "$c_zfs_mount_dir" \
+			"$rpool_name" "${rpool_disks_partition}"  # rpool
+
 	echo "\$v_bpool_tweaks is $v_bpool_tweaks"
 	echo "\$c_zfs_mount_dir is $c_zfs_mount_dir"
 	echo "\$bpool_name is $bpool_name"
@@ -575,17 +585,9 @@ function create_pools {
 	# `-d` disable all the pool features (not used here);
 	#
 	# shellcheck disable=SC2086 # see above
-	zpool create ${v_bpool_tweaks} \
-			-O mountpoint=/boot -R "$c_zfs_mount_dir" -f \
+	zpool create -f ${v_bpool_tweaks} \
+			-O mountpoint=/boot -R "$c_zfs_mount_dir" \
 			"$bpool_name" "${bpool_disks_partition}"  # bpool
-
-	echo "\$v_rpool_tweaks is $v_rpool_tweaks"
-	echo "\$c_zfs_mount_dir is $c_zfs_mount_dir"
-	echo "\$rpool_name is $rpool_name"
-	echo "\$rpool_disks_partition is $rpool_disks_partition"
-	zpool create ${v_rpool_tweaks} \
-			-O mountpoint=/ -R "$c_zfs_mount_dir" -f \
-			"$rpool_name" "${rpool_disks_partition}"  # rpool
 
 	echo "zpool create ends"
 	echo "function create_pools ends"
@@ -602,6 +604,7 @@ function create_zfs_partitions {
 	zfs create -o mountpoint=/tmp            ${rpool_name}/tmp
 	zfs create -o mountpoint=/usr            ${rpool_name}/usr
 	zfs create -o mountpoint=/var            ${rpool_name}/var
+	zfs create -o mountpoint=/var/lib        ${rpool_name}/var/lib
 	zfs create -o mountpoint=/var/lib/docker ${rpool_name}/var/lib/docker
 
 	echo "create_zfs_partitions ends"
@@ -646,17 +649,17 @@ function remove_temp_partition_and_expand_rpool {
 
 	parted -s "$selected_disk" rm 5
 	parted -s "$selected_disk" unit s resizepart 4 -- "100%"
-	zpool online -e "$rpool_name" "$selected_disk-part4"
+	zpool online -e "$rpool_name" "${selected_disk}-part4"
 }
 
 function prepare_jail {
-  print_step_info_header prepare_jail
+	print_step_info_header prepare_jail
 
-  for virtual_fs_dir in proc sys dev; do
-    mount --rbind "/$virtual_fs_dir" "$c_zfs_mount_dir/$virtual_fs_dir"
-  done
+	for virtual_fs_dir in proc sys dev; do
+		mount --rbind "/$virtual_fs_dir" "$c_zfs_mount_dir/$virtual_fs_dir"
+	done
 
-  chroot_execute 'echo "nameserver 8.8.8.8" >> /etc/resolv.conf'
+	chroot_execute 'echo "nameserver 8.8.8.8" >> /etc/resolv.conf'
 }
 
 # See install_host_packages() for some comments.
@@ -709,32 +712,13 @@ function install_and_configure_bootloader {
   # GRUB support encrypted ZFS partitions. This hasn't been a requirement in all the tests
   # performed on 18.04, but it's better to keep this reference just in case.
 
-  chroot_execute "update-grub"
-}
-
-function sync_efi_partitions {
-	print_step_info_header sync_efi_partitions
-
-	local synced_efi_partition_path="/boot/efi2"
-
-	chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${selected_disk}-part1") $synced_efi_partition_path vfat nofail,x-systemd.device-timeout=1 0 1 >> /etc/fstab"
-
-	chroot_execute "mkdir -p $synced_efi_partition_path"
-	chroot_execute "mount $synced_efi_partition_path"
-
-	chroot_execute "rsync --archive --delete --verbose /boot/efi/ $synced_efi_partition_path"
-
-	efibootmgr --create --disk "${selected_disk}" --label "ubuntu-2" --loader '\EFI\ubuntu\grubx64.efi'
-
-	chroot_execute "umount $synced_efi_partition_path"
-
-	chroot_execute "umount /boot/efi"
+  chroot_execute "update-grub"  # grub-mkconfig -o /boot/grub/grub.cfg と同じ
 }
 
 function configure_boot_pool_import {
-  print_step_info_header configure_boot_pool_import
+	print_step_info_header configure_boot_pool_import
 
-  chroot_execute "cat > /etc/systemd/system/zfs-import-$bpool_name.service <<UNIT
+	chroot_execute "cat > /etc/systemd/system/zfs-import-${bpool_name}.service <<UNIT
 [Unit]
 DefaultDependencies=no
 Before=zfs-import-scan.service
@@ -744,17 +728,17 @@ Before=zfs-import-cache.service
 Type=oneshot
 RemainAfterExit=yes
 ExecStartPre=/bin/sh -c '[ -f /etc/zfs/zpool.cache ] && mv /etc/zfs/zpool.cache /etc/zfs/preboot_zpool.cache || true'
-ExecStart=/sbin/zpool import -N -o cachefile=none $bpool_name
+ExecStart=/sbin/zpool import -N -o cachefile=none ${bpool_name}
 ExecStartPost=/bin/sh -c '[ -f /etc/zfs/preboot_zpool.cache ] && mv /etc/zfs/preboot_zpool.cache /etc/zfs/zpool.cache || true'
 
 [Install]
 WantedBy=zfs-import.target
 UNIT"
 
-  chroot_execute "systemctl enable zfs-import-$bpool_name.service"
+  chroot_execute "systemctl enable zfs-import-${bpool_name}.service"
 
-  chroot_execute "zfs set mountpoint=legacy $bpool_name"
-  chroot_execute "echo $bpool_name /boot zfs nodev,relatime,x-systemd.requires=zfs-import-$bpool_name.service 0 0 >> /etc/fstab"
+  chroot_execute "zfs set mountpoint=legacy ${bpool_name}"
+  chroot_execute "echo ${bpool_name} /boot zfs nodev,relatime,x-systemd.requires=zfs-import-${bpool_name}.service 0 0 >> /etc/fstab"
 }
 
 # We don't care about synchronizing with the `fstrim` service for two reasons:
@@ -802,7 +786,7 @@ function configure_remaining_settings {
 	local block_device_basename=$(basename $(readlink -f $selected_disk))
 
 	[[ $swap_size -gt 0 ]] && chroot_execute "echo /dev/${block_device_basename}2 swap swap defaults 0 0 >> /etc/fstab" || true
-	chroot_execute "echo RESUME=none > /etc/initramfs-tools/conf.d/resume"
+	chroot_execute "echo RESUME=none > /etc/initramfs-tools/conf.d/resume"  # ハイバネーション無
 }
 
 function prepare_for_system_exit {
@@ -862,3 +846,10 @@ fi
 
 # 未定義のサブコマンドなら help を表示して終了
 display_help_and_exit
+
+# /boot/efi/EFI/ubuntu/grub.cfg の例
+# GRUB のプロンプトで grub> ls -l とすると UUID を確認できる
+# GPT の GUID ではないので注意
+#
+# search --fs-uuid 0123456789abcdef --set bpool
+# configfile ($bpool)/@/grub/grub.cfg
