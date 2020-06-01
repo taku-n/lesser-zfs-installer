@@ -713,6 +713,8 @@ function install_and_configure_bootloader {
   # performed on 18.04, but it's better to keep this reference just in case.
 
   chroot_execute "update-grub"  # grub-mkconfig -o /boot/grub/grub.cfg と同じ
+
+	chroot_execute "umount /boot/efi"
 }
 
 function configure_boot_pool_import {
