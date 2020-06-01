@@ -549,8 +549,8 @@ function create_pools {
 
 	# POOL OPTIONS #######################
 
-	local rpool_disks_partitions="${selected_disk}-part4"
-	local bpool_disks_partitions="${selected_disk}-part3"
+	local rpool_partition="${selected_disk}-part4"
+	local bpool_partition="${selected_disk}-part3"
 
 	# POOLS CREATION #####################
 
@@ -573,21 +573,21 @@ function create_pools {
 	echo "\$v_rpool_tweaks is $v_rpool_tweaks"
 	echo "\$c_zfs_mount_dir is $c_zfs_mount_dir"
 	echo "\$rpool_name is $rpool_name"
-	echo "\$rpool_disks_partition is $rpool_disks_partition"
+	echo "\$rpool_partition is $rpool_partition"
 	zpool create -f ${v_rpool_tweaks} \
 			-O mountpoint=/ -R "$c_zfs_mount_dir" \
-			"$rpool_name" "${rpool_disks_partition}"  # rpool
+			"$rpool_name" "${rpool_partition}"  # rpool
 
 	echo "\$v_bpool_tweaks is $v_bpool_tweaks"
 	echo "\$c_zfs_mount_dir is $c_zfs_mount_dir"
 	echo "\$bpool_name is $bpool_name"
-	echo "\$bpool_disks_partition is $bpool_disks_partition"
+	echo "\$bpool_partition is $bpool_partition"
 	# `-d` disable all the pool features (not used here);
 	#
 	# shellcheck disable=SC2086 # see above
 	zpool create -f ${v_bpool_tweaks} \
 			-O mountpoint=/boot -R "$c_zfs_mount_dir" \
-			"$bpool_name" "${bpool_disks_partition}"  # bpool
+			"$bpool_name" "${bpool_partition}"  # bpool
 
 	echo "zpool create ends"
 	echo "function create_pools ends"
@@ -737,8 +737,12 @@ UNIT"
 
   chroot_execute "systemctl enable zfs-import-${bpool_name}.service"
 
+	echo "Setting up bpool..."
+
   chroot_execute "zfs set mountpoint=legacy ${bpool_name}"
   chroot_execute "echo ${bpool_name} /boot zfs nodev,relatime,x-systemd.requires=zfs-import-${bpool_name}.service 0 0 >> /etc/fstab"
+
+	echo "configure_boot_pool_import ends"
 }
 
 # We don't care about synchronizing with the `fstrim` service for two reasons:
