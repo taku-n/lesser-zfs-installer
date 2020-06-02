@@ -1,10 +1,11 @@
 #!/bin/bash
-# shellcheck disable=SC2015,SC2016
+# shellcheck disable=SC2015,SC2016,SC2034
 
 # Shellcheck issue descriptions:
 #
 # - SC2015: <condition> && <operation> || true
 # - SC2016: annoying warning about using single quoted strings with characters used for interpolation
+# - SC2034: triggers a bug on the `-v` test (see https://git.io/Jenyu)
 
 set -o errexit
 set -o pipefail
@@ -240,6 +241,8 @@ function check_prerequisites {
 
   local distro_version_regex=\\b${v_linux_version//./\\.}\\b
 
+  # shellcheck disable=SC2116 # `=~ $(echo ...)` causes a warning; see https://git.io/Je2QP.
+  #
   if [[ ! -d /sys/firmware/efi ]]; then
     echo 'System firmware directory not found; make sure to boot in EFI mode!'
     exit 1
@@ -593,19 +596,11 @@ function ask_pool_names {
 function ask_pool_tweaks {
   print_step_info_header
 
-  local bpool_tweaks_message='Insert the tweaks for the boot pool
-
-The option `-O devices=off` is already set, and must not be specified.'
-
-  local raw_bpool_tweaks=${ZFS_BPOOL_TWEAKS:-$(whiptail --inputbox "$bpool_tweaks_message" 30 100 -- "$c_default_bpool_tweaks" 3>&1 1>&2 2>&3)}
+  local raw_bpool_tweaks=${ZFS_BPOOL_TWEAKS:-$(whiptail --inputbox "Insert the tweaks for the boot pool" 30 100 -- "$c_default_bpool_tweaks" 3>&1 1>&2 2>&3)}
 
   mapfile -d' ' -t v_bpool_tweaks < <(echo -n "$raw_bpool_tweaks")
 
-  local rpool_tweaks_message='Insert the tweaks for the root pool
-
-The option `-O devices=off` is already set, and must not be specified.'
-
-  local raw_rpool_tweaks=${ZFS_RPOOL_TWEAKS:-$(whiptail --inputbox "$rpool_tweaks_message" 30 100 -- "$c_default_rpool_tweaks" 3>&1 1>&2 2>&3)}
+  local raw_rpool_tweaks=${ZFS_RPOOL_TWEAKS:-$(whiptail --inputbox "Insert the tweaks for the root pool" 30 100 -- "$c_default_rpool_tweaks" 3>&1 1>&2 2>&3)}
 
   mapfile -d' ' -t v_rpool_tweaks < <(echo -n "$raw_rpool_tweaks")
 
@@ -714,12 +709,6 @@ function setup_partitions {
   fi
 
   for selected_disk in "${v_selected_disks[@]}"; do
-    # wipefs doesn't fully wipe ZFS labels.
-    #
-    find "$(dirname "$selected_disk")" -name "$(basename "$selected_disk")-part*" -exec bash -c '
-      zpool labelclear -f "$1" 2> /dev/null || true
-    ' _ {} \;
-
     # More thorough than `sgdisk --zap-all`.
     #
     wipefs --all "$selected_disk"
@@ -948,7 +937,8 @@ function create_pools {
   #
   # Stdin is ignored if the encryption is not set (and set via prompt).
   #
-  # shellcheck disable=SC2086 # TODO: convert v_pools_raid_type to array, and quote
+  # shellcheck disable=SC2086 # quoting $v_pools_raid_type; barring invalid user input, the values are guaranteed not to
+  # need quoting.
   zpool create \
     "${encryption_options[@]}" \
     "${v_rpool_tweaks[@]}" \
@@ -958,7 +948,7 @@ function create_pools {
 
   # `-d` disable all the pool features (not used here);
   #
-  # shellcheck disable=SC2086 # TODO: See above
+  # shellcheck disable=SC2086 # see above
   zpool create \
     "${v_bpool_tweaks[@]}" \
     -O devices=off -O mountpoint=/boot -R "$c_zfs_mount_dir" -f \
