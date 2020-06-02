@@ -452,8 +452,11 @@ function setup_partitions {
 	#   done
 	# done
 
-	mkfs.fat -F 32 -n esp "${selected_disk}-part1"  # EFI System Partition (FAT32)
-	mkfs.ext4 -L bpart "${selected_disk}-part2"     # /boot partition (ext4)
+	# A label of FAT32 partition should be capitalized.
+	mkfs.fat -F 32 -n ESP "${selected_disk}-part1"  # EFI System Partition (FAT32)
+
+	# -F option means force.
+	mkfs.ext4 -F -L bpart "${selected_disk}-part2"  # /boot partition (ext4)
 
 	v_temp_volume_device=$(readlink -f "${selected_disk}-part5")
 }
