@@ -672,8 +672,8 @@ function install_jail_zfs_packages {
 function install_and_configure_bootloader {
 	print_step_info_header install_and_configure_bootloader
 
-	chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${selected_disk}-part2") /boot ext4 defaults 0 2 >> /etc/fstab"
-	chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${selected_disk}-part1") /boot/efi vfat nofail,x-systemd.device-timeout=1 0 1 > /etc/fstab"
+	chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${selected_disk}-part2") /boot ext4 defaults 0 2 > /etc/fstab"
+	chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${selected_disk}-part1") /boot/efi vfat nofail,x-systemd.device-timeout=1 0 1 >> /etc/fstab"
 
 	chroot_execute "mount /boot"
 	chroot_execute "mkdir /boot/efi"
