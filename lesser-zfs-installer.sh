@@ -603,16 +603,19 @@ function create_zfs_partitions {
 }
 
 function sync_os_temp_installation_dir_to_rpool {
-  print_step_info_header sync_os_temp_installation_dir_to_rpool
+	print_step_info_header sync_os_temp_installation_dir_to_rpool
 
-  # On Ubuntu Server, `/boot/efi` and `/cdrom` (!!!) are mounted, but they're not needed.
-  #
-  local mount_dir_submounts
-  mount_dir_submounts=$(mount | MOUNT_DIR="${c_installed_os_data_mount_dir%/}" perl -lane 'print $F[2] if $F[2] =~ /$ENV{MOUNT_DIR}\//')
+	# On Ubuntu Server, `/boot/efi` and `/cdrom` (!!!) are mounted, but they're not needed.
+	#
+	local mount_dir_submounts
+	mount_dir_submounts=$(mount | MOUNT_DIR="${c_installed_os_data_mount_dir%/}" perl -lane 'print $F[2] if $F[2] =~ /$ENV{MOUNT_DIR}\//')
 
   for mount_dir in $mount_dir_submounts; do
     umount "$mount_dir"
   done
+
+	mkdir ${c_zfs_mount_dir}/boot
+	mount ${selected_disk}-part2 ${c_zfs_mount_dir}/boot
 
   # Extended attributes are not used on a standard Ubuntu installation, however, this needs to be generic.
   # There isn't an exact way to filter out filenames in the rsync output, so we just use a good enough heuristic.
@@ -634,6 +637,7 @@ function sync_os_temp_installation_dir_to_rpool {
   fi
 
   umount "$c_installed_os_data_mount_dir"
+	umount ${c_zfs_mount_dir}/boot
 }
 
 function remove_temp_partition_and_expand_rpool {
@@ -858,8 +862,8 @@ fi
 # Grub のプロンプトからマニュアルでブート
 #
 # grub> insmod gzio
-# grub> part_gpt
-# grub> zfs
+# grub> insmod part_gpt
+# grub> insmod zfs
 # grub> search --label bpool --set bpool
 # grub> linux ($bpool)/@/vmlinuz root=ZFS=rpool
 # grub> initrd ($bpool)/@/initrd.img
