@@ -712,7 +712,8 @@ function install_and_configure_bootloader {
   # GRUB support encrypted ZFS partitions. This hasn't been a requirement in all the tests
   # performed on 18.04, but it's better to keep this reference just in case.
 
-  chroot_execute "update-grub"  # grub-mkconfig -o /boot/grub/grub.cfg と同じ
+	# なぜかエントリーをつくってくれない (vmlinuz と initrd.img を検出できていない?)
+	chroot_execute "update-grub"  # grub-mkconfig -o /boot/grub/grub.cfg と同じ
 
 	chroot_execute "umount /boot/efi"
 }
@@ -859,3 +860,13 @@ fi
 #
 # search --fs-uuid 0123456789abcdef --set bpool
 # configfile ($bpool)/@/grub/grub.cfg
+
+# Grub のプロンプトからマニュアルでブート
+#
+# grub> insmod gzio
+# grub> part_gpt
+# grub> zfs
+# grub> search --label bpool --set bpool
+# grub> linux ($bpool)/@/vmlinuz root=ZFS=rpool
+# grub> initrd ($bpool)/@/initrd.img
+# grub> boot
