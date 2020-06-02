@@ -870,3 +870,5 @@ fi
 # grub> linux ($bpool)/@/vmlinuz root=ZFS=rpool
 # grub> initrd ($bpool)/@/initrd.img
 # grub> boot
+
+# /boot って ZFS である必要性ある?
