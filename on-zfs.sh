@@ -25,15 +25,14 @@ v_zfs_08_in_repository=      # 1=true, false otherwise (applies only to Ubuntu-b
 #
 # Note that `ZFS_PASSPHRASE` and `ZFS_POOLS_RAID_TYPE` consider the unset state (see help).
 
-v_bpool_name=
+v_bpool_name=bpool
 v_bpool_tweaks=              # array; see defaults below for format
 v_root_password=             # Debian-only
-v_rpool_name=
+v_rpool_name=rpool
 v_rpool_tweaks=              # array; see defaults below for format
 v_pools_raid_type=
 declare -a v_selected_disks  # (/dev/by-id/disk_id, ...)
 v_swap_size=                 # integer
-v_free_tail_space=           # integer
 selected_disk=
 
 # Variables set during execution
@@ -338,7 +337,7 @@ LOG
 
 If you'\''re running inside a VMWare virtual machine, you need to add set `disk.EnableUUID = "TRUE"` in the .vmx configuration file.
 
-If you think this is a bug, please open an issue on https://github.com/saveriomiroddi/zfs-installer/issues, and attach the file `'"$c_disks_log"'`.
+If you think this is a bug, please open an issue on https://github.com/taku-n/on-zfs/issues, and attach the file `'"$c_disks_log"'`.
 '
     whiptail --msgbox "$dialog_message" 30 100
 
@@ -540,13 +539,7 @@ function install_host_packages_UbuntuServer {
 }
 
 function setup_partitions {
-  print_step_info_header
-
-  if [[ $v_free_tail_space -eq 0 ]]; then
-    local tail_space_start=0
-  else
-    local tail_space_start="-${v_free_tail_space}G"
-  fi
+	print_step_info_header
 
 	# wipefs doesn't fully wipe ZFS labels.
 	#
@@ -558,11 +551,18 @@ function setup_partitions {
 	#
 	wipefs --all "$selected_disk"
 
-	sgdisk -n 1:1M:+"$c_boot_partition_size" -t 1:EF00 "$selected_disk" # EFI System
-	sgdisk -n 2::+"${v_swap_size}G"          -t 2:8200 "$selected_disk" # Linux swap
-	sgdisk -n 3::+"$c_boot_partition_size"   -t 3:BF01 "$selected_disk" # Mac ZFS (bpool)
-	sgdisk -n 4::"$c_temporary_volume_size"  -t 4:BF01 "$selected_disk" # Mac ZFS (rpool)
-	sgdisk -n 5::                            -t 5:8300 "$selected_disk" # Linux File System
+	if [ $v_swap_size -eq 0 ]; then
+		sgdisk -n 1:1M:+"$c_boot_partition_size" -t 1:EF00 "$selected_disk" # EFI System
+		sgdisk -n 2::+"$c_boot_partition_size"   -t 2:BF01 "$selected_disk" # Mac ZFS (bpool
+		sgdisk -n 3::"$c_temporary_volume_size"  -t 3:BF01 "$selected_disk" # Mac ZFS (rpool
+		sgdisk -n 4::                            -t 4:8300 "$selected_disk" # Linux File Sys
+	else
+		sgdisk -n 1:1M:+"$c_boot_partition_size" -t 1:EF00 "$selected_disk" # EFI System
+		sgdisk -n 2::+"${v_swap_size}G"          -t 2:8200 "$selected_disk" # Linux swap
+		sgdisk -n 3::+"$c_boot_partition_size"   -t 3:BF01 "$selected_disk" # Mac ZFS (bpool
+		sgdisk -n 4::"$c_temporary_volume_size"  -t 4:BF01 "$selected_disk" # Mac ZFS (rpool
+		sgdisk -n 5::                            -t 5:8300 "$selected_disk" # Linux File Sys
+	fi
 
   # The partition symlinks are not immediately created, so we wait.
   #
@@ -592,13 +592,25 @@ function setup_partitions {
   #   done
   # done
 
-	efi_partition=${selected_disk}-part1
-	swap_partition=${selected_disk}-part2
-	bpool_partition=${selected_disk}-part3
-	rpool_partition=${selected_disk}-part4
-	temp_partition=${selected_disk}-part5
+	if [ $v_swap_size -eq 0 ]; then
+		efi_partition=${selected_disk}-part1
+		bpool_partition=${selected_disk}-part2
+		rpool_partition=${selected_disk}-part3
+		temp_partition=${selected_disk}-part4
+	else
+		efi_partition=${selected_disk}-part1
+		swap_partition=${selected_disk}-part2
+		bpool_partition=${selected_disk}-part3
+		rpool_partition=${selected_disk}-part4
+		temp_partition=${selected_disk}-part5
+	fi
 
-	mkfs.fat -F 32 -n ESP $efi_partition
+	if [ $v_swap_size -eq 0 ]; then
+		mkfs.fat -F 32 -n ESP $efi_partition
+	else
+		mkfs.fat -F 32 -n ESP $efi_partition
+		mkswap -L spart $swap_partition
+	fi
 
 	v_temp_volume_device=$(readlink -f $temp_partition)
 }
@@ -781,8 +793,14 @@ function remove_temp_partition_and_expand_rpool {
 
 	local resize_reference=100%
 
-	parted -s "$selected_disk" rm 5
-	parted -s "$selected_disk" unit s resizepart 4 -- "$resize_reference"
+	if [ $v_swap_size -eq 0 ]; then
+		parted -s "$selected_disk" rm 4
+		parted -s "$selected_disk" unit s resizepart 3 -- "$resize_reference"
+	else
+		parted -s "$selected_disk" rm 5
+		parted -s "$selected_disk" unit s resizepart 4 -- "$resize_reference"
+	fi
+
 	zpool online -e "$v_rpool_name" $rpool_partition
 }
 
@@ -937,7 +955,7 @@ TIMER"
 }
 
 function configure_remaining_settings {
-  print_step_info_header
+	print_step_info_header
 
 	[[ $v_swap_size -gt 0 ]] && chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value ${swap_partition}) swap swap defaults 0 0 >> /etc/fstab" || true
 	chroot_execute "echo RESUME=none > /etc/initramfs-tools/conf.d/resume"
@@ -1008,9 +1026,6 @@ create_passphrase_named_pipe
 select_disk
 ask_encryption
 ask_swap_size
-v_free_tail_space=0
-v_bpool_name=bpool
-v_rpool_name=rpool
 ask_pool_tweaks
 
 distro_dependent_invoke "install_host_packages"
