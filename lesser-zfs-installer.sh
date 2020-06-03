@@ -654,7 +654,7 @@ At the partitioning stage:
 
 - select `Custom storage layout` -> `Done`
 - select `'"$v_temp_volume_device"'` -> `Edit`
-  - set `Format:` to `ext4` (mountpoint will be automatically selected)
+  - set `Format:` to `ext4` (mountpoint will be automatically selected. If not, `/`.)
   - click `Save`
 - click `Done` -> `Continue` (ignore warning)
 - follow through the installation, until the end (after the UPDATES are APPLIED)
