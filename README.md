@@ -1,12 +1,10 @@
-[![Build Status][BS IMG]](https://travis-ci.org/saveriomiroddi/zfs-installer)
-
 # lesser-zfs-installer
 
-ZFS installer is a shell script program that fully prepares ZFS on a system, and allows an effortless installation of Ubuntu operating systems using their standard installer.
+lesser-zfs-installer forked from [zfs-installer](https://github.com/saveriomiroddi/zfs-installer) is a shell script program that fully prepares ZFS on a system, and allows an effortless installation of Ubuntu operating systems using their standard installer.
 
-lesser-zfs-installer.sh makes a swap partition as a legacy partition and ZFS partitions of /home, /opt, /root, /snap, /srv, /tmp, /usr/local, /var, and /var/lib/docker.
+lesser-zfs-installer makes a swap partition as a legacy partition and ZFS partitions of /home, /opt, /root, /snap, /srv, /tmp, /usr/local, /var, and /var/lib/docker.
 
-lesser-zfs-installer.sh can not treat multiple disks and RAID.
+lesser-zfs-installer can not treat multiple disks and RAID.
 
 ## Requirements and functionality
 
@@ -17,9 +15,7 @@ The program currently supports:
 
 The ZFS version installed is 0.8, which supports native encryption and trimming (among the other improvements over 0.7). The required repositories are automatically added to the destination system.
 
-EFI boot is required (any modern (2011+) system will do); legacy boot is currently not supported.
-
-It's fairly easy to extend the program to support other Debian-based operating systems (e.g. older/newer Ubuntu's, etc.) - the project is (very) open to feature requests.
+EFI boot is required (any modern (2011+) system will do); legacy boot is not supported.
 
 ## Comparison with Ubuntu built-in installer
 
@@ -54,7 +50,7 @@ then follow the instructions; halfway through the procedure, the GUI installer o
 
 Ubuntu Server requires a slightly different execution procedure:
 
-- when the installer welcome screen shows up, tap `Alt + F2`,
+- when the installer welcome screen shows up, press `Alt + F2`,
 - then type `curl -L https://git.io/JfPVP | sudo bash`.
 
 then follow the instructions.
