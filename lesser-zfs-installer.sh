@@ -164,30 +164,6 @@ function display_help_and_exit {
 Sets up and install a ZFS Ubuntu installation.
 
 This script needs to be run with admin permissions, from a Live CD.
-
-The procedure can be entirely automated via environment variables:
-
-- ZFS_OS_INSTALLATION_SCRIPT : path of a script to execute instead of Ubiquity (see dedicated section below)
-- ZFS_SELECTED_DISKS         : full path of the devices to create the pool on, comma-separated
-- ZFS_ENCRYPT_RPOOL          : set 1 to encrypt the pool
-- ZFS_PASSPHRASE             : set non-blank to encrypt the pool, and blank not to. if unset, it will be asked.
-- ZFS_DEBIAN_ROOT_PASSWORD
-- ZFS_BPOOL_NAME
-- ZFS_RPOOL_NAME
-- ZFS_BPOOL_TWEAKS           : boot pool options to set on creation (defaults to `'$c_default_bpool_tweaks'`)
-- ZFS_RPOOL_TWEAKS           : root pool options to set on creation (defaults to `'$c_default_rpool_tweaks'`)
-- ZFS_POOLS_RAID_TYPE        : options: blank (striping), `mirror`, `raidz`, `raidz2`, `raidz3`; if unset, it will be asked.
-- ZFS_NO_INFO_MESSAGES       : set 1 to skip informational messages
-- ZFS_SWAP_SIZE              : swap size (integer); set 0 for no swap
-- ZFS_FREE_TAIL_SPACE        : leave free space at the end of each disk (integer), for example, for a swap partition
-
-- ZFS_SKIP_LIVE_ZFS_MODULE_INSTALL : (debug) set 1 to skip installing the ZFS package on the live system; speeds up installation on preset machines
-
-When installing the O/S via $ZFS_OS_INSTALLATION_SCRIPT, the root pool is mounted as `'$c_zfs_mount_dir'`; the requisites are:
-
-1. the virtual filesystems must be mounted in `'$c_zfs_mount_dir'` (ie. `for vfs in proc sys dev; do mount --rbind /$vfs '$c_zfs_mount_dir'/$vfs; done`)
-2. internet must be accessible while chrooting in `'$c_zfs_mount_dir'` (ie. `echo nameserver 8.8.8.8 >> '$c_zfs_mount_dir'/etc/resolv.conf`)
-3. `'$c_zfs_mount_dir'` must be left in a dismountable state (e.g. no file locks, no swap etc.);
 '
 
   echo "$help"
@@ -670,7 +646,7 @@ function install_operating_system_UbuntuServer {
 
   local dialog_message='You'\''ll now need to run the Ubuntu Server installer (Subiquity).
 
-Switch back to the original terminal (Ctrl+Shift+F1), then proceed with the configuration as usual.
+Switch back to the original terminal (Alt + F1), then proceed with the configuration as usual.
 
 When the update option is presented, choose to update Subiquity to the latest version.
 
@@ -681,10 +657,10 @@ At the partitioning stage:
   - set `Format:` to `ext4` (mountpoint will be automatically selected)
   - click `Save`
 - click `Done` -> `Continue` (ignore warning)
-- follow through the installation, until the end (after the updates are applied)
-- switch back to this terminal (Ctrl+Alt+F2), and continue (tap Enter)
+- follow through the installation, until the end (after the UPDATES are APPLIED)
+- switch back to this terminal (Alt + F2), and continue (press Enter)
 
-Do not continue in this terminal (tap Enter) now!
+Do NOT continue in this terminal (press Enter) now!
 
 You can switch anytime to this terminal, and back, in order to read the instructions.
 '
