@@ -751,7 +751,16 @@ function create_pools {
 }
 
 function create_zfs_partitions {
-	:
+	zfs create -o mountpoint=/home           ${rpool_name}/home
+	zfs create -o mountpoint=/opt            ${rpool_name}/opt
+	zfs create -o mountpoint=/root           ${rpool_name}/root
+	zfs create -o mountpoint=/snap           ${rpool_name}/snap
+	zfs create -o mountpoint=/srv            ${rpool_name}/srv
+	zfs create -o mountpoint=/tmp            ${rpool_name}/tmp
+	zfs create -o mountpoint=/usr            ${rpool_name}/usr
+	zfs create -o mountpoint=/var            ${rpool_name}/var
+	zfs create -o mountpoint=/var/lib        ${rpool_name}/var/lib
+	zfs create -o mountpoint=/var/lib/docker ${rpool_name}/var/lib/docker
 }
 
 function sync_os_temp_installation_dir_to_rpool {
