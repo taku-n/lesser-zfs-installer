@@ -757,9 +757,10 @@ function create_zfs_partitions {
 	zfs create -o mountpoint=/snap           ${v_rpool_name}/snap
 	zfs create -o mountpoint=/srv            ${v_rpool_name}/srv
 	zfs create -o mountpoint=/tmp            ${v_rpool_name}/tmp
-	zfs create -o mountpoint=/usr            ${v_rpool_name}/usr
+	zfs create -o canmount=off               ${v_rpool_name}/usr      # Just to make a parent.
+	zfs create -o mountpoint=/usr/local      ${v_rpool_name}/usr/local
 	zfs create -o mountpoint=/var            ${v_rpool_name}/var
-	zfs create -o mountpoint=/var/lib        ${v_rpool_name}/var/lib
+	zfs create -o canmount=off               ${v_rpool_name}/var/lib  # Just to make a parent.
 	zfs create -o mountpoint=/var/lib/docker ${v_rpool_name}/var/lib/docker
 }
 
