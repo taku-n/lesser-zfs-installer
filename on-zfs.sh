@@ -1125,7 +1125,6 @@ create_passphrase_named_pipe
 
 select_disks
 select_pools_raid_type
-distro_dependent_invoke "ask_root_password" --noforce
 ask_encryption
 ask_swap_size
 ask_free_tail_space
@@ -1135,13 +1134,13 @@ ask_pool_tweaks
 distro_dependent_invoke "install_host_packages"
 setup_partitions
 
-  # Includes the O/S extra configuration, if necessary (network, root pwd, etc.)
-  distro_dependent_invoke "install_operating_system"
+# Includes the O/S extra configuration, if necessary (network, root pwd, etc.)
+distro_dependent_invoke "install_operating_system"
 
-  create_pools
-  create_zfs_partitions
-  sync_os_temp_installation_dir_to_rpool
-  remove_temp_partition_and_expand_rpool
+create_pools
+create_zfs_partitions
+sync_os_temp_installation_dir_to_rpool
+remove_temp_partition_and_expand_rpool
 
 prepare_jail
 distro_dependent_invoke "install_jail_zfs_packages"
