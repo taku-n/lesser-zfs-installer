@@ -34,11 +34,17 @@ v_pools_raid_type=
 declare -a v_selected_disks  # (/dev/by-id/disk_id, ...)
 v_swap_size=                 # integer
 v_free_tail_space=           # integer
+selected_disk=
 
 # Variables set during execution
 
 v_temp_volume_device=        # /dev/zdN; scope: setup_partitions -> sync_os_temp_installation_dir_to_rpool
 v_suitable_disks=()          # (/dev/by-id/disk_id, ...); scope: find_suitable_disks -> select_disk
+efi_partition=
+swap_partition=
+bpool_partition=
+rpool_partition=
+temp_partition=
 
 # Constants
 
@@ -47,7 +53,7 @@ c_default_rpool_tweaks="-o ashift=12 -O acltype=posixacl -O compression=lz4 -O d
 c_zfs_mount_dir=/mnt
 c_installed_os_data_mount_dir=/target
 declare -A c_supported_linux_distributions=([Debian]=10 [Ubuntu]="18.04 20.04" [UbuntuServer]="18.04 20.04" [LinuxMint]="19.1 19.2 19.3" [elementary]=5.1)
-c_boot_partition_size=768M   # while 512M are enough for a few kernels, the Ubuntu updater complains after a couple
+c_boot_partition_size=1G   # while 512M are enough for a few kernels, the Ubuntu updater complains after a couple
 c_temporary_volume_size=12G  # large enough; Debian, for example, takes ~8 GiB.
 c_passphrase_named_pipe=$(dirname "$(mktemp)")/zfs-installer.pp.fifo
 
@@ -382,79 +388,24 @@ function create_passphrase_named_pipe {
   mkfifo "$c_passphrase_named_pipe"
 }
 
-function select_disks {
-  print_step_info_header
+function select_disk {
+	print_step_info_header
 
-  if [[ "${ZFS_SELECTED_DISKS:-}" != "" ]]; then
-    mapfile -d, -t v_selected_disks < <(echo -n "$ZFS_SELECTED_DISKS")
-  else
-    while true; do
-      local menu_entries_option=()
-      local block_device_basename
+	local menu_entries_option=()
+	local block_device_basename
 
-      if [[ ${#v_suitable_disks[@]} -eq 1 ]]; then
-        local disk_selection_status=ON
-      else
-        local disk_selection_status=OFF
-      fi
+	for disk_id in "${v_suitable_disks[@]}"; do
+		block_device_basename="$(basename "$(readlink -f "$disk_id")")"
+		menu_entries_option+=("$disk_id" "($block_device_basename)")
+	done
 
-      for disk_id in "${v_suitable_disks[@]}"; do
-        block_device_basename="$(basename "$(readlink -f "$disk_id")")"
-        menu_entries_option+=("$disk_id" "($block_device_basename)" "$disk_selection_status")
-      done
-
-      local dialog_message="Select the ZFS devices.
+	local dialog_message="Select the ZFS devices.
 
 Devices with mounted partitions, cdroms, and removable devices are not displayed!
 "
-      mapfile -t v_selected_disks < <(whiptail --checklist --separate-output "$dialog_message" 30 100 $((${#menu_entries_option[@]} / 3)) "${menu_entries_option[@]}" 3>&1 1>&2 2>&3)
+	selected_disk=$(whiptail --menu --separate-output "$dialog_message" 30 100 $((${#menu_entries_option[@]} / 3)) "${menu_entries_option[@]}" 3>&1 1>&2 2>&3)
 
-      if [[ ${#v_selected_disks[@]} -gt 0 ]]; then
-        break
-      fi
-    done
-  fi
-
-  print_variables v_selected_disks
-}
-
-function select_pools_raid_type {
-  print_step_info_header
-
-  if [[ -v ZFS_POOLS_RAID_TYPE ]]; then
-    v_pools_raid_type=$ZFS_POOLS_RAID_TYPE
-  elif [[ ${#v_selected_disks[@]} -ge 2 ]]; then
-    # Entries preparation.
-
-    local menu_entries_option=(
-      ""      "Striping array" OFF
-      mirror  Mirroring        OFF
-      raidz   RAIDZ1           OFF
-    )
-
-    if [[ ${#v_selected_disks[@]} -ge 3 ]]; then
-      menu_entries_option+=(raidz2 RAIDZ2 OFF)
-    fi
-
-    if [[ ${#v_selected_disks[@]} -ge 4 ]]; then
-      menu_entries_option+=(raidz3 RAIDZ3 OFF)
-    fi
-
-    # Defaults (ultimately, arbitrary). Based on https://calomel.org/zfs_raid_speed_capacity.html.
-
-    if [[ ${#v_selected_disks[@]} -ge 11 ]]; then
-      menu_entries_option[14]=ON
-    elif [[ ${#v_selected_disks[@]} -ge 6 ]]; then
-      menu_entries_option[11]=ON
-    elif [[ ${#v_selected_disks[@]} -ge 5 ]]; then
-      menu_entries_option[8]=ON
-    else
-      menu_entries_option[5]=ON
-    fi
-
-    local dialog_message="Select the pools RAID type."
-    v_pools_raid_type=$(whiptail --radiolist "$dialog_message" 30 100 $((${#menu_entries_option[@]} / 3)) "${menu_entries_option[@]}" 3>&1 1>&2 2>&3)
-  fi
+	print_variables selected_disk
 }
 
 function ask_encryption {
@@ -496,9 +447,6 @@ Leave blank to keep encryption disabled.
 function ask_swap_size {
   print_step_info_header
 
-  if [[ ${ZFS_SWAP_SIZE:-} != "" ]]; then
-    v_swap_size=$ZFS_SWAP_SIZE
-  else
    local swap_size_invalid_message=
 
     while [[ ! $v_swap_size =~ ^[0-9]+$ ]]; do
@@ -506,57 +454,8 @@ function ask_swap_size {
 
       swap_size_invalid_message="Invalid swap size! "
     done
-  fi
 
   print_variables v_swap_size
-}
-
-function ask_free_tail_space {
-  print_step_info_header
-
-  if [[ ${ZFS_FREE_TAIL_SPACE:-} != "" ]]; then
-    v_free_tail_space=$ZFS_FREE_TAIL_SPACE
-  else
-   local tail_space_invalid_message=
-
-    while [[ ! $v_free_tail_space =~ ^[0-9]+$ ]]; do
-      v_free_tail_space=$(whiptail --inputbox "${tail_space_invalid_message}Enter the space in GiB to leave at the end of each disk (0 for none):" 30 100 0 3>&1 1>&2 2>&3)
-
-      tail_space_invalid_message="Invalid size! "
-    done
-  fi
-
-  print_variables v_free_tail_space
-}
-
-function ask_pool_names {
-  print_step_info_header
-
-  if [[ ${ZFS_BPOOL_NAME:-} != "" ]]; then
-    v_bpool_name=$ZFS_BPOOL_NAME
-  else
-    local bpool_name_invalid_message=
-
-    while [[ ! $v_bpool_name =~ ^[a-z][a-zA-Z_:.-]+$ ]]; do
-      v_bpool_name=$(whiptail --inputbox "${bpool_name_invalid_message}Insert the name for the boot pool" 30 100 bpool 3>&1 1>&2 2>&3)
-
-      bpool_name_invalid_message="Invalid pool name! "
-    done
-  fi
-
-  if [[ ${ZFS_RPOOL_NAME:-} != "" ]]; then
-    v_rpool_name=$ZFS_RPOOL_NAME
-  else
-    local rpool_name_invalid_message=
-
-    while [[ ! $v_rpool_name =~ ^[a-z][a-zA-Z_:.-]+$ ]]; do
-      v_rpool_name=$(whiptail --inputbox "${rpool_name_invalid_message}Insert the name for the root pool" 30 100 rpool 3>&1 1>&2 2>&3)
-
-      rpool_name_invalid_message="Invalid pool name! "
-    done
-  fi
-
-  print_variables v_bpool_name v_rpool_name
 }
 
 function ask_pool_tweaks {
@@ -643,30 +542,27 @@ function install_host_packages_UbuntuServer {
 function setup_partitions {
   print_step_info_header
 
-  local temporary_partition_start=-$((${c_temporary_volume_size:0:-1} + v_free_tail_space))G
-
   if [[ $v_free_tail_space -eq 0 ]]; then
     local tail_space_start=0
   else
     local tail_space_start="-${v_free_tail_space}G"
   fi
 
-  for selected_disk in "${v_selected_disks[@]}"; do
-    # wipefs doesn't fully wipe ZFS labels.
-    #
-    find "$(dirname "$selected_disk")" -name "$(basename "$selected_disk")-part*" -exec bash -c '
+	# wipefs doesn't fully wipe ZFS labels.
+	#
+	find "$(dirname "$selected_disk")" -name "$(basename "$selected_disk")-part*" -exec bash -c '
       zpool labelclear -f "$1" 2> /dev/null || true
     ' _ {} \;
 
-    # More thorough than `sgdisk --zap-all`.
-    #
-    wipefs --all "$selected_disk"
+	# More thorough than `sgdisk --zap-all`.
+	#
+	wipefs --all "$selected_disk"
 
-    sgdisk -n1:1M:+"$c_boot_partition_size"   -t1:EF00 "$selected_disk" # EFI boot
-    sgdisk -n2:0:+"$c_boot_partition_size"    -t2:BF01 "$selected_disk" # Boot pool
-    sgdisk -n3:0:"$temporary_partition_start" -t3:BF01 "$selected_disk" # Root pool
-    sgdisk -n4:0:"$tail_space_start"          -t4:8300 "$selected_disk" # Temporary partition
-  done
+	sgdisk -n 1:1M:+"$c_boot_partition_size" -t 1:EF00 "$selected_disk" # EFI System
+	sgdisk -n 2::+"${v_swap_size}G"          -t 2:8200 "$selected_disk" # Linux swap
+	sgdisk -n 3::+"$c_boot_partition_size"   -t 3:BF01 "$selected_disk" # Mac ZFS (bpool)
+	sgdisk -n 4::"$c_temporary_volume_size"  -t 4:BF01 "$selected_disk" # Mac ZFS (rpool)
+	sgdisk -n 5::                            -t 5:8300 "$selected_disk" # Linux File System
 
   # The partition symlinks are not immediately created, so we wait.
   #
@@ -696,11 +592,15 @@ function setup_partitions {
   #   done
   # done
 
-  for selected_disk in "${v_selected_disks[@]}"; do
-    mkfs.fat -F 32 -n EFI "${selected_disk}-part1"
-  done
+	efi_partition=${selected_disk}-part1
+	swap_partition=${selected_disk}-part2
+	bpool_partition=${selected_disk}-part3
+	rpool_partition=${selected_disk}-part4
+	temp_partition=${selected_disk}-part5
 
-  v_temp_volume_device=$(readlink -f "${v_selected_disks[0]}-part4")
+	mkfs.fat -F 32 -n ESP $efi_partition
+
+	v_temp_volume_device=$(readlink -f $temp_partition)
 }
 
 function install_operating_system {
@@ -811,11 +711,6 @@ function create_pools {
 
   set -x
 
-  for selected_disk in "${v_selected_disks[@]}"; do
-    rpool_disks_partitions+=("${selected_disk}-part3")
-    bpool_disks_partitions+=("${selected_disk}-part2")
-  done
-
   # POOLS CREATION #####################
 
   # See https://github.com/zfsonlinux/zfs/wiki/Ubuntu-18.04-Root-on-ZFS for the details.
@@ -831,7 +726,7 @@ function create_pools {
     "${encryption_options[@]}" \
     "${v_rpool_tweaks[@]}" \
     -O devices=off -O mountpoint=/ -R "$c_zfs_mount_dir" -f \
-    "$v_rpool_name" $v_pools_raid_type "${rpool_disks_partitions[@]}" \
+    "$v_rpool_name" $v_pools_raid_type "$rpool_partition" \
     < "$c_passphrase_named_pipe"
 
   # `-d` disable all the pool features (not used here);
@@ -840,18 +735,10 @@ function create_pools {
   zpool create \
     "${v_bpool_tweaks[@]}" \
     -O devices=off -O mountpoint=/boot -R "$c_zfs_mount_dir" -f \
-    "$v_bpool_name" $v_pools_raid_type "${bpool_disks_partitions[@]}"
+    "$v_bpool_name" $v_pools_raid_type "$bpool_partition"
 }
 
 function create_zfs_partitions {
-  if [[ $v_swap_size -gt 0 ]]; then
-    zfs create \
-      -V "${v_swap_size}G" -b "$(getconf PAGESIZE)" \
-      -o compression=zle -o logbias=throughput -o sync=always -o primarycache=metadata -o secondarycache=none -o com.sun:auto-snapshot=false \
-      "$v_rpool_name/swap"
-
-    mkswap -f "/dev/zvol/$v_rpool_name/swap"
-  fi
 }
 
 function sync_os_temp_installation_dir_to_rpool {
@@ -891,17 +778,11 @@ function sync_os_temp_installation_dir_to_rpool {
 function remove_temp_partition_and_expand_rpool {
   print_step_info_header
 
-  if [[ $v_free_tail_space -eq 0 ]]; then
-    local resize_reference=100%
-  else
-    local resize_reference=-${v_free_tail_space}G
-  fi
+	local resize_reference=100%
 
-  for selected_disk in "${v_selected_disks[@]}"; do
-    parted -s "$selected_disk" rm 4
-    parted -s "$selected_disk" unit s resizepart 3 -- "$resize_reference"
-    zpool online -e "$v_rpool_name" "$selected_disk-part3"
-  done
+	parted -s "$selected_disk" rm 5
+	parted -s "$selected_disk" unit s resizepart 4 -- "$resize_reference"
+	zpool online -e "$v_rpool_name" $rpool_partition
 }
 
 function prepare_jail {
@@ -955,7 +836,7 @@ function install_jail_zfs_packages_UbuntuServer {
 function install_and_configure_bootloader {
   print_step_info_header
 
-  chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${v_selected_disks[0]}-part1") /boot/efi vfat nofail,x-systemd.device-timeout=1 0 1 > /etc/fstab"
+  chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value ${efi_partition}) /boot/efi vfat nofail,x-systemd.device-timeout=1 0 1 > /etc/fstab"
 
   chroot_execute "mkdir -p /boot/efi"
   chroot_execute "mount /boot/efi"
@@ -1057,8 +938,8 @@ TIMER"
 function configure_remaining_settings {
   print_step_info_header
 
-  [[ $v_swap_size -gt 0 ]] && chroot_execute "echo /dev/zvol/$v_rpool_name/swap none swap discard 0 0 >> /etc/fstab" || true
-  chroot_execute "echo RESUME=none > /etc/initramfs-tools/conf.d/resume"
+	[[ $v_swap_size -gt 0 ]] && chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value ${swap_partition}) swap swap defaults 0 0 >> /etc/fstab" || true
+	chroot_execute "echo RESUME=none > /etc/initramfs-tools/conf.d/resume"
 }
 
 function prepare_for_system_exit {
@@ -1123,11 +1004,12 @@ find_suitable_disks
 find_zfs_package_requirements
 create_passphrase_named_pipe
 
-select_disks
-select_pools_raid_type
+select_disk
 ask_encryption
 ask_swap_size
-ask_free_tail_space
+v_free_tail_space=0
+v_bpool_name=bpool
+v_rpool_name=rpool
 ask_pool_names
 ask_pool_tweaks
 
