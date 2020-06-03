@@ -554,13 +554,13 @@ function setup_partitions {
 	if [ $v_swap_size -eq 0 ]; then
 		sgdisk -n 1:1M:+"$c_boot_partition_size" -t 1:EF00 "$selected_disk" # EFI System
 		sgdisk -n 2::+"$c_boot_partition_size"   -t 2:BF01 "$selected_disk" # Mac ZFS (bpool
-		sgdisk -n 3::"$c_temporary_volume_size"  -t 3:BF01 "$selected_disk" # Mac ZFS (rpool
+		sgdisk -n 3::+"$c_temporary_volume_size" -t 3:BF01 "$selected_disk" # Mac ZFS (rpool
 		sgdisk -n 4::                            -t 4:8300 "$selected_disk" # Linux File Sys
 	else
 		sgdisk -n 1:1M:+"$c_boot_partition_size" -t 1:EF00 "$selected_disk" # EFI System
 		sgdisk -n 2::+"${v_swap_size}G"          -t 2:8200 "$selected_disk" # Linux swap
 		sgdisk -n 3::+"$c_boot_partition_size"   -t 3:BF01 "$selected_disk" # Mac ZFS (bpool
-		sgdisk -n 4::"$c_temporary_volume_size"  -t 4:BF01 "$selected_disk" # Mac ZFS (rpool
+		sgdisk -n 4::+"$c_temporary_volume_size" -t 4:BF01 "$selected_disk" # Mac ZFS (rpool
 		sgdisk -n 5::                            -t 5:8300 "$selected_disk" # Linux File Sys
 	fi
 
