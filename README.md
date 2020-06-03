@@ -55,6 +55,26 @@ Ubuntu Server requires a slightly different execution procedure:
 
 then follow the instructions.
 
+### After Installation (optional)
+
+If you want to make a ZFS partition for your home directory, type these commands.
+
+```
+$ cd
+$ pwd               # Check your home directory.
+
+$ sudo -i           # To avoid creating ".sudo_as_admin_successful" when you execute zfs command.
+# shopt -s dotglob  # To move dot files too.
+# mkdir /tmp/temp
+# mv /home/your-username/* /tmp/temp
+
+# zfs create -o mountpoint=/home/your-username rpool/home/your-username
+
+# mv /tmp/temp/* /home/your-username
+# exit
+$ exit              # To see the files moved.
+```
+
 ## Demo
 
 ![Demo](/demo/demo.gif?raw=true)
