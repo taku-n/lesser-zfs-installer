@@ -551,6 +551,8 @@ function setup_partitions {
 	#
 	wipefs --all "$selected_disk"
 
+	dd bs=512 seek=1 count=33 if=/dev/zero of=$selected_disk  # Fill Primary GPT with 0x00.
+
 	if [ $v_swap_size -eq 0 ]; then
 		sgdisk -n 1:1M:+"$c_boot_partition_size" -t 1:EF00 "$selected_disk" # EFI System
 		sgdisk -n 2::+"$c_boot_partition_size"   -t 2:BF01 "$selected_disk" # Mac ZFS (bpool
