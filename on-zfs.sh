@@ -739,6 +739,7 @@ function create_pools {
 }
 
 function create_zfs_partitions {
+	:
 }
 
 function sync_os_temp_installation_dir_to_rpool {
@@ -1010,7 +1011,6 @@ ask_swap_size
 v_free_tail_space=0
 v_bpool_name=bpool
 v_rpool_name=rpool
-ask_pool_names
 ask_pool_tweaks
 
 distro_dependent_invoke "install_host_packages"
