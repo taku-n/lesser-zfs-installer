@@ -58,7 +58,7 @@ c_zfs_mount_dir=/mnt
 c_installed_os_data_mount_dir=/target
 declare -A c_supported_linux_distributions=([Ubuntu]="20.04" [UbuntuServer]="20.04")
 EFI_SYSTEM_PARTITION_SIZE=1G
-BPOOL_PARTITION_SIZE=1G
+BPART_PARTITION_SIZE=1G
 TEMPORARY_VOLUME_SIZE=12G  # large enough; Debian, for example, takes ~8 GiB.
 
 c_log_dir=$(mktemp -dp /tmp on-zfs_XXX)  # e.g. /tmp/on-zfs_xyz
@@ -121,7 +121,7 @@ function stage2 {
 	prepare_jail
 	install_jail_zfs_packages
 	install_and_configure_bootloader
-	configure_boot_pool_import
+	#configure_boot_pool_import
 	configure_pools_trimming
 	configure_remaining_settings
 
@@ -419,8 +419,8 @@ function setup_partitions {
 	wipefs --all "$selected_disk"
 
 	sgdisk -n 1:1M:+"$EFI_SYSTEM_PARTITION_SIZE" -t 1:EF00 "$selected_disk" # EFI System
-	sgdisk -n 2::+"$swap_size"                   -t 2:8200 "$selected_disk" # Linux swap
-	sgdisk -n 3::+"$BPOOL_PARTITION_SIZE"        -t 3:BF01 "$selected_disk" # Mac ZFS (bpool)
+	sgdisk -n 2::+"$BPART_PARTITION_SIZE"        -t 2:8300 "$selected_disk" # Linux File System
+	sgdisk -n 3::+"$swap_size"                   -t 3:8200 "$selected_disk" # Linux swap
 	sgdisk -n 4::+"$TEMPORARY_VOLUME_SIZE"       -t 4:BF01 "$selected_disk" # Mac ZFS (rpool)
 	sgdisk -n 5::                                -t 5:8300 "$selected_disk" # Linux File System
 
@@ -452,7 +452,11 @@ function setup_partitions {
 	#   done
 	# done
 
-	mkfs.fat -F 32 -n esp "${selected_disk}-part1"  # EFI System Partition (FAT32)
+	# A label of FAT32 partition should be capitalized.
+	mkfs.fat -F 32 -n ESP "${selected_disk}-part1"  # EFI System Partition (FAT32)
+
+	# -F option means force.
+	mkfs.ext4 -F -L bpart "${selected_disk}-part2"  # /boot partition (ext4)
 
 	v_temp_volume_device=$(readlink -f "${selected_disk}-part5")
 }
@@ -550,7 +554,6 @@ function create_pools {
 	# POOL OPTIONS #######################
 
 	local rpool_partition="${selected_disk}-part4"
-	local bpool_partition="${selected_disk}-part3"
 
 	# POOLS CREATION #####################
 
@@ -567,27 +570,16 @@ function create_pools {
 
 	echo "zpool create begins"
 
-	# rpool をつくってから bpool をつくる
-	# 逆だとマウントできなくなる
-
 	echo "\$v_rpool_tweaks is $v_rpool_tweaks"
 	echo "\$c_zfs_mount_dir is $c_zfs_mount_dir"
 	echo "\$rpool_name is $rpool_name"
 	echo "\$rpool_partition is $rpool_partition"
-	zpool create -f ${v_rpool_tweaks} \
-			-O mountpoint=/ -R "$c_zfs_mount_dir" \
-			"$rpool_name" "${rpool_partition}"  # rpool
-
-	echo "\$v_bpool_tweaks is $v_bpool_tweaks"
-	echo "\$c_zfs_mount_dir is $c_zfs_mount_dir"
-	echo "\$bpool_name is $bpool_name"
-	echo "\$bpool_partition is $bpool_partition"
 	# `-d` disable all the pool features (not used here);
 	#
 	# shellcheck disable=SC2086 # see above
-	zpool create -f ${v_bpool_tweaks} \
-			-O mountpoint=/boot -R "$c_zfs_mount_dir" \
-			"$bpool_name" "${bpool_partition}"  # bpool
+	zpool create -f ${v_rpool_tweaks} \
+			-O mountpoint=/ -R "$c_zfs_mount_dir" \
+			"$rpool_name" "${rpool_partition}"  # rpool
 
 	echo "zpool create ends"
 	echo "function create_pools ends"
@@ -611,16 +603,19 @@ function create_zfs_partitions {
 }
 
 function sync_os_temp_installation_dir_to_rpool {
-  print_step_info_header sync_os_temp_installation_dir_to_rpool
+	print_step_info_header sync_os_temp_installation_dir_to_rpool
 
-  # On Ubuntu Server, `/boot/efi` and `/cdrom` (!!!) are mounted, but they're not needed.
-  #
-  local mount_dir_submounts
-  mount_dir_submounts=$(mount | MOUNT_DIR="${c_installed_os_data_mount_dir%/}" perl -lane 'print $F[2] if $F[2] =~ /$ENV{MOUNT_DIR}\//')
+	# On Ubuntu Server, `/boot/efi` and `/cdrom` (!!!) are mounted, but they're not needed.
+	#
+	local mount_dir_submounts
+	mount_dir_submounts=$(mount | MOUNT_DIR="${c_installed_os_data_mount_dir%/}" perl -lane 'print $F[2] if $F[2] =~ /$ENV{MOUNT_DIR}\//')
 
   for mount_dir in $mount_dir_submounts; do
     umount "$mount_dir"
   done
+
+	mkdir ${c_zfs_mount_dir}/boot
+	mount ${selected_disk}-part2 ${c_zfs_mount_dir}/boot
 
   # Extended attributes are not used on a standard Ubuntu installation, however, this needs to be generic.
   # There isn't an exact way to filter out filenames in the rsync output, so we just use a good enough heuristic.
@@ -642,6 +637,7 @@ function sync_os_temp_installation_dir_to_rpool {
   fi
 
   umount "$c_installed_os_data_mount_dir"
+	umount ${c_zfs_mount_dir}/boot
 }
 
 function remove_temp_partition_and_expand_rpool {
@@ -681,12 +677,13 @@ function install_jail_zfs_packages {
 }
 
 function install_and_configure_bootloader {
-  print_step_info_header install_and_configure_bootloader
+	print_step_info_header install_and_configure_bootloader
 
-  chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${selected_disk}-part1") /boot/efi vfat nofail,x-systemd.device-timeout=1 0 1 > /etc/fstab"
+	chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${selected_disk}-part2") /boot ext4 defaults 0 2 > /etc/fstab"
+	chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${selected_disk}-part1") /boot/efi vfat nofail,x-systemd.device-timeout=1 0 1 >> /etc/fstab"
 
-  chroot_execute "mkdir -p /boot/efi"
-  chroot_execute "mount /boot/efi"
+	chroot_execute "mount /boot"
+	chroot_execute "mount /boot/efi"
 
   chroot_execute "grub-install"
 
@@ -716,6 +713,7 @@ function install_and_configure_bootloader {
 	chroot_execute "update-grub"  # grub-mkconfig -o /boot/grub/grub.cfg と同じ
 
 	chroot_execute "umount /boot/efi"
+	chroot_execute "umount /boot"
 }
 
 function configure_boot_pool_import {
@@ -765,7 +763,6 @@ ConditionVirtualization=!container
 
 [Service]
 Type=oneshot
-ExecStart=/sbin/zpool trim $bpool_name
 ExecStart=/sbin/zpool trim $rpool_name
 UNIT"
 
@@ -792,7 +789,7 @@ function configure_remaining_settings {
 
 	local block_device_basename=$(basename $(readlink -f $selected_disk))
 
-	[[ $swap_size -gt 0 ]] && chroot_execute "echo /dev/${block_device_basename}2 swap swap defaults 0 0 >> /etc/fstab" || true
+	[[ $swap_size -gt 0 ]] && chroot_execute "echo PARTUUID=$(blkid -s PARTUUID -o value "${selected_disk}-part3") swap swap defaults 0 0 >> /etc/fstab" || true
 	chroot_execute "echo RESUME=none > /etc/initramfs-tools/conf.d/resume"  # ハイバネーション無
 }
 
@@ -864,11 +861,9 @@ fi
 # Grub のプロンプトからマニュアルでブート
 #
 # grub> insmod gzio
-# grub> part_gpt
-# grub> zfs
+# grub> insmod part_gpt
+# grub> insmod zfs
 # grub> search --label bpool --set bpool
 # grub> linux ($bpool)/@/vmlinuz root=ZFS=rpool
 # grub> initrd ($bpool)/@/initrd.img
 # grub> boot
-
-# /boot って ZFS である必要性ある?
