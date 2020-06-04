@@ -530,7 +530,7 @@ function setup_partitions {
 	# Fill Primary GPT with 0x00.
 	dd bs=512 seek=1 count=33 conv=notrunc if=/dev/zero of=$selected_disk
 
-        blockdev --rereadpt
+	partprobe $selected_disk
 
 	if [ $v_swap_size -eq 0 ]; then
 		sgdisk -n 1:1M:+"$c_boot_partition_size" -t 1:EF00 "$selected_disk" # EFI System
