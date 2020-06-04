@@ -543,6 +543,8 @@ function setup_partitions {
 		sgdisk -n 5::                            -t 5:8300 "$selected_disk" # Linux File Sys
 	fi
 
+	echo "If blockdev fails, rerun this script."
+
 	blockdev --rereadpt $selected_disk
 
   # The partition symlinks are not immediately created, so we wait.
@@ -586,7 +588,7 @@ function setup_partitions {
 		temp_partition=${selected_disk}-part5
 	fi
 
-	echo "If mkfs.fat and mkswap fail, rerun this script."
+	echo "If mkfs.fat or mkswap fail, rerun this script."
 
 	if [ $v_swap_size -eq 0 ]; then
 		mkfs.fat -F 32 -n ESP $efi_partition
