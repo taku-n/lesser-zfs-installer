@@ -68,6 +68,8 @@ $ sudo -i           # To avoid creating ".sudo_as_admin_successful" when you exe
 # mkdir /tmp/temp
 # mv /home/your-username/* /tmp/temp
 
+# # These properties are inherited from their pool.
+# # compression, devices, xattr, dnodesize, acltype, relatime
 # zfs create -o mountpoint=/home/your-username rpool/home/your-username
 
 # mv /tmp/temp/* /home/your-username

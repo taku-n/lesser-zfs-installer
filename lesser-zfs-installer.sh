@@ -51,8 +51,8 @@ c_default_bpool_tweaks="-o ashift=12"
 c_default_rpool_tweaks="-o ashift=12 -O acltype=posixacl -O compression=lz4 -O dnodesize=auto -O relatime=on -O xattr=sa -O normalization=formD"
 c_zfs_mount_dir=/mnt
 c_installed_os_data_mount_dir=/target
-declare -A c_supported_linux_distributions=([Debian]=10 [Ubuntu]="18.04 20.04" [UbuntuServer]="18.04 20.04" [LinuxMint]="19.1 19.2 19.3" [elementary]=5.1)
-c_boot_partition_size=1G   # while 512M are enough for a few kernels, the Ubuntu updater complains after a couple
+declare -A c_supported_linux_distributions=([Ubuntu]="20.04" [UbuntuServer]="20.04")
+c_boot_partition_size=1G     # while 512M are enough for a few kernels, the Ubuntu updater complains after a couple
 c_temporary_volume_size=12G  # large enough; Debian, for example, takes ~8 GiB.
 c_passphrase_named_pipe=$(dirname "$(mktemp)")/zfs-installer.pp.fifo
 
@@ -530,6 +530,8 @@ function setup_partitions {
 	# Fill Primary GPT with 0x00.
 	dd bs=512 seek=1 count=33 conv=notrunc if=/dev/zero of=$selected_disk
 
+        blockdev --rereadpt
+
 	if [ $v_swap_size -eq 0 ]; then
 		sgdisk -n 1:1M:+"$c_boot_partition_size" -t 1:EF00 "$selected_disk" # EFI System
 		sgdisk -n 2::+"$c_boot_partition_size"   -t 2:BF01 "$selected_disk" # Mac ZFS (bpool
@@ -730,6 +732,9 @@ function create_pools {
 }
 
 function create_zfs_partitions {
+	# These properties are inherited from their pool.
+	# compression, devices, xattr, dnodesize, acltype, relatime
+
 	zfs create -o mountpoint=/home           ${v_rpool_name}/home
 	zfs create -o mountpoint=/opt            ${v_rpool_name}/opt
 	zfs create -o mountpoint=/root           ${v_rpool_name}/root
