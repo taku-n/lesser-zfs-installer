@@ -586,6 +586,8 @@ function setup_partitions {
 		temp_partition=${selected_disk}-part5
 	fi
 
+	echo "If mkfs.fat and mkswap fail, rerun this script."
+
 	if [ $v_swap_size -eq 0 ]; then
 		mkfs.fat -F 32 -n ESP $efi_partition
 	else
