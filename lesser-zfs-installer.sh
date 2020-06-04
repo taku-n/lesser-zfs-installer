@@ -530,8 +530,6 @@ function setup_partitions {
 	# Fill Primary GPT with 0x00.
 	dd bs=512 seek=1 count=33 conv=notrunc if=/dev/zero of=$selected_disk
 
-	partprobe $selected_disk
-
 	if [ $v_swap_size -eq 0 ]; then
 		sgdisk -n 1:1M:+"$c_boot_partition_size" -t 1:EF00 "$selected_disk" # EFI System
 		sgdisk -n 2::+"$c_boot_partition_size"   -t 2:BF01 "$selected_disk" # Mac ZFS (bpool
@@ -544,6 +542,8 @@ function setup_partitions {
 		sgdisk -n 4::+"$c_temporary_volume_size" -t 4:BF01 "$selected_disk" # Mac ZFS (rpool
 		sgdisk -n 5::                            -t 5:8300 "$selected_disk" # Linux File Sys
 	fi
+
+	blockdev --rereadpt $selected_disk
 
   # The partition symlinks are not immediately created, so we wait.
   #
