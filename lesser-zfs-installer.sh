@@ -660,7 +660,8 @@ At the partitioning stage:
   - set `Format:` to `ext4` (mountpoint will be automatically selected. If not, `/`.)
   - click `Save`
 - click `Done` -> `Continue` (ignore warning)
-- follow through the installation, until the end (after the UPDATES are APPLIED)
+- follow through the installation, until the end (after the UPDATES are APPLIED, Reboot shows)
+  (do NOT believe messages of "Installation complete!" and "Finished install!")
 - switch back to this terminal (Alt + F2), and continue (press Enter)
 
 Do NOT continue in this terminal (press Enter) now!
