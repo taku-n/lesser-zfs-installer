@@ -52,6 +52,7 @@ Ubuntu Server requires a slightly different execution procedure:
 
 - when the installer welcome screen shows up, press `Alt + F2`,
 - then type `curl -L https://git.io/JfPVP | sudo bash`.
+- If you are using a ConoHa VPS, `curl -L https://git.io/JfjRA | sudo bash` instead.
 
 then follow the instructions.
 

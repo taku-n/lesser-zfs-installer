@@ -255,47 +255,47 @@ In order to stop the procedure, hit Esc twice during dialogs (excluding yes/no o
 }
 
 function find_suitable_disks {
-  print_step_info_header
+	print_step_info_header
 
-  # In some freaky cases, `/dev/disk/by-id` is not up to date, so we refresh. One case is after
-  # starting a VirtualBox VM that is a full clone of a suspended VM with snapshots.
-  #
-  udevadm trigger
+	# In some freaky cases, `/dev/disk/by-id` is not up to date, so we refresh. One case is after
+	# starting a VirtualBox VM that is a full clone of a suspended VM with snapshots.
+	#
+	udevadm trigger
 
-  # shellcheck disable=SC2012 # `ls` may clean the output, but in this case, it doesn't matter
-  ls -l /dev/disk/by-id | tail -n +2 | perl -lane 'print "@F[8..10]"' > "$c_disks_log"
+	# shellcheck disable=SC2012 # `ls` may clean the output, but in this case, it doesn't matter
+	ls -l /dev/disk/by-id | tail -n +2 | perl -lane 'print "@F[8..10]"' > "$c_disks_log"
 
-  local candidate_disk_ids
-  local mounted_devices
+	local candidate_disk_ids
+	local mounted_devices
 
-  # Iterating via here-string generates an empty line when no devices are found. The options are
-  # either using this strategy, or adding a conditional.
-  #
-  candidate_disk_ids=$(find /dev/disk/by-id -regextype awk -regex '.+/(ata|nvme|scsi|mmc)-.+' -not -regex '.+-part[0-9]+$' | sort)
-  mounted_devices="$(df | awk 'BEGIN {getline} {print $1}' | xargs -n 1 lsblk -no pkname 2> /dev/null | sort -u || true)"
+	# Iterating via here-string generates an empty line when no devices are found. The options are
+	# either using this strategy, or adding a conditional.
+	#
+	candidate_disk_ids=$(find /dev/disk/by-path -regextype awk -regex '.+/virtio-.+' -not -regex '.+-part[0-9]+$' | sort)
+	mounted_devices="$(df | awk 'BEGIN {getline} {print $1}' | xargs -n 1 lsblk -no pkname 2> /dev/null | sort -u || true)"
 
-  while read -r disk_id || [[ -n "$disk_id" ]]; do
-    local device_info
-    local block_device_basename
+	while read -r disk_id || [[ -n "$disk_id" ]]; do
+		local device_info
+		local block_device_basename
 
-    device_info="$(udevadm info --query=property "$(readlink -f "$disk_id")")"
-    block_device_basename="$(basename "$(readlink -f "$disk_id")")"
+		device_info="$(udevadm info --query=property "$(readlink -f "$disk_id")")"
+		block_device_basename="$(basename "$(readlink -f "$disk_id")")"
 
-    # It's unclear if it's possible to establish with certainty what is an internal disk:
-    #
-    # - there is no (obvious) spec around
-    # - pretty much everything has `DEVTYPE=disk`, e.g. LUKS devices
-    # - ID_TYPE is optional
-    #
-    # Therefore, it's probably best to rely on the id name, and just filter out optical devices.
-    #
-    if ! grep -q '^ID_TYPE=cd$' <<< "$device_info"; then
-      if ! grep -q "^$block_device_basename\$" <<< "$mounted_devices"; then
-        v_suitable_disks+=("$disk_id")
-      fi
-    fi
+		# It's unclear if it's possible to establish with certainty what is an internal disk:
+		#
+		# - there is no (obvious) spec around
+		# - pretty much everything has `DEVTYPE=disk`, e.g. LUKS devices
+		# - ID_TYPE is optional
+		#
+		# Therefore, it's probably best to rely on the id name, and just filter out optical devices.
+		#
+		if ! grep -q '^ID_TYPE=cd$' <<< "$device_info"; then
+			if ! grep -q "^$block_device_basename\$" <<< "$mounted_devices"; then
+				v_suitable_disks+=("$disk_id")
+			fi
+		fi
 
-    cat >> "$c_disks_log" << LOG
+		cat >> "$c_disks_log" << LOG
 
 ## DEVICE: $disk_id ################################
 
@@ -303,21 +303,21 @@ $(udevadm info --query=property "$(readlink -f "$disk_id")")
 
 LOG
 
-  done < <(echo -n "$candidate_disk_ids")
+	done < <(echo -n "$candidate_disk_ids")
 
-  if [[ ${#v_suitable_disks[@]} -eq 0 ]]; then
-    local dialog_message='No suitable disks have been found!
+	if [[ ${#v_suitable_disks[@]} -eq 0 ]]; then
+		local dialog_message='No suitable disks have been found!
 
 If you'\''re running inside a VMWare virtual machine, you need to add set `disk.EnableUUID = "TRUE"` in the .vmx configuration file.
 
 If you think this is a bug, please open an issue on https://github.com/taku-n/on-zfs/issues, and attach the file `'"$c_disks_log"'`.
 '
-    whiptail --msgbox "$dialog_message" 30 100
+		whiptail --msgbox "$dialog_message" 30 100
 
-    exit 1
-  fi
+		exit 1
+	fi
 
-  print_variables v_suitable_disks
+	print_variables v_suitable_disks
 }
 
 # There are three parameters:
