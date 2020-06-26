@@ -271,7 +271,7 @@ function find_suitable_disks {
 	# Iterating via here-string generates an empty line when no devices are found. The options are
 	# either using this strategy, or adding a conditional.
 	#
-	candidate_disk_ids=$(find /dev/disk/by-path -regextype awk -regex '.+/virtio-.+' -not -regex '.+-part[0-9]+$' | sort)
+	candidate_disk_ids=$(find /dev/disk/by-path -regextype awk -regex '.+/virtio.+' -not -regex '.+-part[0-9]+$' | sort)
 	mounted_devices="$(df | awk 'BEGIN {getline} {print $1}' | xargs -n 1 lsblk -no pkname 2> /dev/null | sort -u || true)"
 
 	while read -r disk_id || [[ -n "$disk_id" ]]; do
@@ -527,14 +527,15 @@ function setup_partitions {
 	# Fill Primary GPT with 0x00.
 	dd bs=512 seek=1 count=33 conv=notrunc if=/dev/zero of=$selected_disk
 
+	# If you put -a option after -t option, an alignment happens.
 	if [ $v_swap_size -eq 0 ]; then
-		sgdisk -n 1:34:2047                      -t 1:EF02 -a 1 "$selected_disk" # BIOS boot
+		sgdisk -a 1 -n 1:34:2047                 -t 1:EF02 "$selected_disk" # BIOS boot part
 		sgdisk -n 2:1M:+"$c_boot_partition_size" -t 2:EF00 "$selected_disk" # EFI System
 		sgdisk -n 3::+"$c_boot_partition_size"   -t 3:BF01 "$selected_disk" # Mac ZFS (bpool
 		sgdisk -n 4::+"$c_temporary_volume_size" -t 4:BF01 "$selected_disk" # Mac ZFS (rpool
 		sgdisk -n 5::                            -t 5:8300 "$selected_disk" # Linux File Sys
 	else
-		sgdisk -n 1:34:2047                      -t 1:EF02 -a 1 "$selected_disk" # BIOS boot
+		sgdisk -a 1 -n 1:34:2047                 -t 1:EF02 "$selected_disk" # BIOS boot part
 		sgdisk -n 2:1M:+"$c_boot_partition_size" -t 2:EF00 "$selected_disk" # EFI System
 		sgdisk -n 3::+"${v_swap_size}G"          -t 3:8200 "$selected_disk" # Linux swap
 		sgdisk -n 4::+"$c_boot_partition_size"   -t 4:BF01 "$selected_disk" # Mac ZFS (bpool
