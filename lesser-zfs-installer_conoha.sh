@@ -528,13 +528,13 @@ function setup_partitions {
 	dd bs=512 seek=1 count=33 conv=notrunc if=/dev/zero of=$selected_disk
 
 	if [ $v_swap_size -eq 0 ]; then
-		sgdisk -n 1:34:2047                      -t 1:EF02 "$selected_disk" # BIOS boot part
+		sgdisk -n 1:34:2047                      -t 1:EF02 -a 1 "$selected_disk" # BIOS boot
 		sgdisk -n 2:1M:+"$c_boot_partition_size" -t 2:EF00 "$selected_disk" # EFI System
 		sgdisk -n 3::+"$c_boot_partition_size"   -t 3:BF01 "$selected_disk" # Mac ZFS (bpool
 		sgdisk -n 4::+"$c_temporary_volume_size" -t 4:BF01 "$selected_disk" # Mac ZFS (rpool
 		sgdisk -n 5::                            -t 5:8300 "$selected_disk" # Linux File Sys
 	else
-		sgdisk -n 1:34:2047                      -t 1:EF02 "$selected_disk" # BIOS boot part
+		sgdisk -n 1:34:2047                      -t 1:EF02 -a 1 "$selected_disk" # BIOS boot
 		sgdisk -n 2:1M:+"$c_boot_partition_size" -t 2:EF00 "$selected_disk" # EFI System
 		sgdisk -n 3::+"${v_swap_size}G"          -t 3:8200 "$selected_disk" # Linux swap
 		sgdisk -n 4::+"$c_boot_partition_size"   -t 4:BF01 "$selected_disk" # Mac ZFS (bpool
