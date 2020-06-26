@@ -528,16 +528,18 @@ function setup_partitions {
 	dd bs=512 seek=1 count=33 conv=notrunc if=/dev/zero of=$selected_disk
 
 	if [ $v_swap_size -eq 0 ]; then
-		sgdisk -n 1:1M:+"$c_boot_partition_size" -t 1:EF00 "$selected_disk" # EFI System
-		sgdisk -n 2::+"$c_boot_partition_size"   -t 2:BF01 "$selected_disk" # Mac ZFS (bpool
-		sgdisk -n 3::+"$c_temporary_volume_size" -t 3:BF01 "$selected_disk" # Mac ZFS (rpool
-		sgdisk -n 4::                            -t 4:8300 "$selected_disk" # Linux File Sys
-	else
-		sgdisk -n 1:1M:+"$c_boot_partition_size" -t 1:EF00 "$selected_disk" # EFI System
-		sgdisk -n 2::+"${v_swap_size}G"          -t 2:8200 "$selected_disk" # Linux swap
+		sgdisk -n 1:34:2047                      -t 1:EF02 "$selected_disk" # BIOS boot part
+		sgdisk -n 2:1M:+"$c_boot_partition_size" -t 2:EF00 "$selected_disk" # EFI System
 		sgdisk -n 3::+"$c_boot_partition_size"   -t 3:BF01 "$selected_disk" # Mac ZFS (bpool
 		sgdisk -n 4::+"$c_temporary_volume_size" -t 4:BF01 "$selected_disk" # Mac ZFS (rpool
 		sgdisk -n 5::                            -t 5:8300 "$selected_disk" # Linux File Sys
+	else
+		sgdisk -n 1:34:2047                      -t 1:EF02 "$selected_disk" # BIOS boot part
+		sgdisk -n 2:1M:+"$c_boot_partition_size" -t 2:EF00 "$selected_disk" # EFI System
+		sgdisk -n 3::+"${v_swap_size}G"          -t 3:8200 "$selected_disk" # Linux swap
+		sgdisk -n 4::+"$c_boot_partition_size"   -t 4:BF01 "$selected_disk" # Mac ZFS (bpool
+		sgdisk -n 5::+"$c_temporary_volume_size" -t 5:BF01 "$selected_disk" # Mac ZFS (rpool
+		sgdisk -n 6::                            -t 6:8300 "$selected_disk" # Linux File Sys
 	fi
 
   # The partition symlinks are not immediately created, so we wait.
@@ -569,16 +571,18 @@ function setup_partitions {
   # done
 
 	if [ $v_swap_size -eq 0 ]; then
-		efi_partition=${selected_disk}-part1
-		bpool_partition=${selected_disk}-part2
-		rpool_partition=${selected_disk}-part3
-		temp_partition=${selected_disk}-part4
-	else
-		efi_partition=${selected_disk}-part1
-		swap_partition=${selected_disk}-part2
+		bios_partition=${selected_disk}-part1
+		efi_partition=${selected_disk}-part2
 		bpool_partition=${selected_disk}-part3
 		rpool_partition=${selected_disk}-part4
 		temp_partition=${selected_disk}-part5
+	else
+		bios_partition=${selected_disk}-part1
+		efi_partition=${selected_disk}-part2
+		swap_partition=${selected_disk}-part3
+		bpool_partition=${selected_disk}-part4
+		rpool_partition=${selected_disk}-part5
+		temp_partition=${selected_disk}-part6
 	fi
 
 	echo "If mkfs.fat or mkswap fails, rerun this script."
@@ -592,7 +596,13 @@ function setup_partitions {
 
 	echo "If blockdev fails, rerun this script."
 
-	blockdev --rereadpt $selected_disk
+	blockdev -V
+	while ! blockdev -v --flushbufs $selected_disk; do
+		sleep 5
+	done
+	while ! blockdev -v --rereadpt $selected_disk; do
+		sleep 5
+	done
 
 	v_temp_volume_device=$(readlink -f $temp_partition)
 }
@@ -793,11 +803,11 @@ function remove_temp_partition_and_expand_rpool {
 	local resize_reference=100%
 
 	if [ $v_swap_size -eq 0 ]; then
-		parted -s "$selected_disk" rm 4
-		parted -s "$selected_disk" unit s resizepart 3 -- "$resize_reference"
-	else
 		parted -s "$selected_disk" rm 5
 		parted -s "$selected_disk" unit s resizepart 4 -- "$resize_reference"
+	else
+		parted -s "$selected_disk" rm 6
+		parted -s "$selected_disk" unit s resizepart 5 -- "$resize_reference"
 	fi
 
 	zpool online -e "$v_rpool_name" $rpool_partition
