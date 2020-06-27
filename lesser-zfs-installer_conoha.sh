@@ -870,7 +870,7 @@ function install_and_configure_bootloader {
   chroot_execute "mkdir -p /boot/efi"
   chroot_execute "mount /boot/efi"
 
-  chroot_execute "grub-install"
+  chroot_execute "grub-install $selected_disk"
 
   chroot_execute "perl -i -pe 's/(GRUB_CMDLINE_LINUX=\")/\${1}root=ZFS=$v_rpool_name /'    /etc/default/grub"
 
