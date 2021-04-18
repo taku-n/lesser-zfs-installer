@@ -79,6 +79,13 @@ $ sudo -i           # To avoid creating ".sudo_as_admin_successful" when you exe
 $ exit              # To see the files moved.
 ```
 
+#### For Docker
+
+Work around this issue: [docker ZFS driver creates hundreds of datasets and doesn’t clean them #41055](https://github.com/moby/moby/issues/41055)
+
+```
+```
+
 ## Demo
 
 ![Demo](/demo/demo.gif?raw=true)
