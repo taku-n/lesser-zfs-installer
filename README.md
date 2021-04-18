@@ -79,6 +79,20 @@ $ sudo -i           # To avoid creating ".sudo_as_admin_successful" when you exe
 $ exit              # To see the files moved.
 ```
 
+#### For Docker
+
+Work around this issue: [docker ZFS driver creates hundreds of datasets and doesn’t clean them #41055](https://github.com/moby/moby/issues/41055)
+
+```
+$ # The volume size, 40G, for Docker is an example.
+$ sudo zfs create -V 40G rpool/var/lib/docker
+$ sudo mkfs.ext4 /dev/rpool/var/lib/docker
+$ sudo mount /dev/rpool/var/lib/docker /var/lib/docker
+$ sudo tail -1 /etc/mtab >> /etc/fstab
+```
+
+Thank you, kraduk.
+
 ## Demo
 
 ![Demo](/demo/demo.gif?raw=true)
