@@ -67,13 +67,14 @@ $ pwd               # Check your home directory.
 $ sudo -i           # To avoid creating ".sudo_as_admin_successful" when you execute zfs command.
 # shopt -s dotglob  # To move dot files too.
 # mkdir /tmp/temp
-# mv /home/your-username/* /tmp/temp
+# mv /home/{your-username}/* /tmp/temp
 
 # # These properties are inherited from their pool.
 # # compression, devices, xattr, dnodesize, acltype, relatime
-# zfs create -o mountpoint=/home/your-username rpool/home/your-username
+# zfs create -o mountpoint=/home/{your-username} rpool/home/{your-username}
 
-# mv /tmp/temp/* /home/your-username
+# mv /tmp/temp/* /home/{your-username}
+# chown {your-username}:{your-username} /home/{your-username}
 # exit
 $ exit              # To see the files moved.
 ```
