@@ -91,6 +91,7 @@ $ sudo mount /dev/rpool/var/lib/docker /var/lib/docker
 $ sudo tail -1 /etc/mtab >> /etc/fstab
 ```
 
+The volume for Docker may be /dev/zd0.  
 Thank you, kraduk.
 
 ## Demo
